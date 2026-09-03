@@ -46,15 +46,6 @@ android {
     }
 }
 
-// 让 APK 文件名带版本号：app-<versionName>-<buildType>.apk
-androidComponents {
-    onVariants(selector().all()) { variant ->
-        variant.outputs.forEach { output ->
-            output.outputFileName.set("app-${variant.versionName.get()}-${variant.name}.apk")
-        }
-    }
-}
-
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))
     implementation("androidx.compose.ui:ui")
