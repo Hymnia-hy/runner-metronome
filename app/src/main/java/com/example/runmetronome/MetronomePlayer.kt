@@ -9,7 +9,7 @@ import android.media.AudioTrack
  * 用 AudioTrack(MODE_STATIC) 无缝循环播放"节拍长 PCM"。
  * 节拍点已在音频采样层面固定，播放时零调度抖动、间隔绝对一致。
  * 支持：响度增益放大、音量实时调整、暂停/继续。
- * USAGE_MEDIA 且不请求音频焦点 → 与音乐共存、不打断。
+ * 所有音色先做峰值归一化，确保响度一致且放大不削波。USAGE_MEDIA 不抢焦点 → 不打断其他音频。
  */
 class MetronomePlayer(private val context: Context) {
 
@@ -17,11 +17,11 @@ class MetronomePlayer(private val context: Context) {
 
     fun prepare(bpm: Double, tone: Tone, volume: Float) {
         release()
-        val tonePcm = BeatPcmBuilder.loadRawPcm(context, tone.resId)
+        val tonePcm = normalize(BeatPcmBuilder.loadRawPcm(context, tone.resId), NORM_PEAK)
         if (tonePcm.isEmpty()) return
         val pcm0 = BeatPcmBuilder.build(bpm, tonePcm, seconds = 120)
         if (pcm0.isEmpty()) return
-        val pcm = applyGain(pcm0, MASTER_GAIN_RATIO) // 响度放大一倍
+        val pcm = applyGain(pcm0, MASTER_GAIN_RATIO)
 
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -71,9 +71,9 @@ class MetronomePlayer(private val context: Context) {
 
     fun release() = stop()
 
-    /** 一次性播放单音（用于报时/倒计时到点）。在后台线程调用，避免阻塞。 */
+    /** 一次性播放单音（用于报时/到点提示）。在后台线程调用。 */
     fun playBeep(tone: Tone, volume: Float) {
-        val tonePcm = BeatPcmBuilder.loadRawPcm(context, tone.resId)
+        val tonePcm = normalize(BeatPcmBuilder.loadRawPcm(context, tone.resId), NORM_PEAK)
         if (tonePcm.isEmpty()) return
         val pcm = applyGain(tonePcm, MASTER_GAIN_RATIO)
         val attrs = AudioAttributes.Builder()
@@ -102,6 +102,18 @@ class MetronomePlayer(private val context: Context) {
         t.release()
     }
 
+    /** 峰值归一化到目标电平，使各音色响度一致，避免放大后削波。 */
+    private fun normalize(pcm: ShortArray, targetPeak: Int): ShortArray {
+        val peak = (pcm.maxOfOrNull { kotlin.math.abs(it.toInt()) } ?: 0).coerceAtLeast(1)
+        val scale = targetPeak.toDouble() / peak
+        if (scale >= 0.99 && scale <= 1.01 && peak <= targetPeak) return pcm
+        val out = ShortArray(pcm.size)
+        for (i in pcm.indices) {
+            out[i] = (pcm[i] * scale).toInt().coerceIn(-32767, 32767).toShort()
+        }
+        return out
+    }
+
     /** 响度增益（放大一倍），限幅防止溢出失真。 */
     private fun applyGain(pcm: ShortArray, gain: Float): ShortArray {
         if (gain <= 1f) return pcm
@@ -115,5 +127,6 @@ class MetronomePlayer(private val context: Context) {
 
     companion object {
         private const val MASTER_GAIN_RATIO = 2.0f
+        private const val NORM_PEAK = 13000
     }
 }
