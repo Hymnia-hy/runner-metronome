@@ -74,8 +74,8 @@ fun AppScreen() {
     var tone by remember { mutableStateOf(Tone.PLUCK) }
     var running by remember { mutableStateOf(false) }
 
-    // 选音色即试听（独立提示音 SoundPool，不干扰节拍器）
-    val previewPool = remember {
+    // 选音色即试听（独立提示音 SoundPool，不干扰节拍器）。注意：play 要用 load 返回的 soundID，而非 resId。
+    val previewState = remember {
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -84,10 +84,11 @@ fun AppScreen() {
             .setAudioAttributes(attrs)
             .setMaxStreams(1)
             .build()
-        Tone.entries.forEach { sp.load(context, it.resId, 1) }
-        sp
+        val ids = mutableMapOf<Tone, Int>()
+        Tone.entries.forEach { ids[it] = sp.load(context, it.resId, 1) }
+        sp to ids
     }
-    DisposableEffect(Unit) { onDispose { previewPool.release() } }
+    DisposableEffect(Unit) { onDispose { previewState.first.release() } }
 
     Column(
         modifier = Modifier
@@ -136,7 +137,8 @@ fun AppScreen() {
                     selected = tone == t,
                     onClick = {
                         tone = t
-                        previewPool.play(t.resId, 0.7f, 0.7f, 1, 0, 1f)
+                        val sid = previewState.second[t]
+                        if (sid != null) previewState.first.play(sid, 0.7f, 0.7f, 1, 0, 1f)
                     },
                     label = { Text(t.display) }
                 )

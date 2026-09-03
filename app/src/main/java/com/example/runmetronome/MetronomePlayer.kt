@@ -6,14 +6,13 @@ import android.media.SoundPool
 
 /**
  * 节拍音播放器：用 SoundPool 播放 raw 里的真实音效。
- * 关键：AudioAttributes 用 USAGE_MEDIA（媒体流），且【不请求音频焦点】，
- * 这样节拍器与 QQ音乐 / 喜马拉雅处于同一混音环境，两者同时发声、互不打断。
- * 采用均匀节拍（每拍同一音色，无重音）。
+ * 重要：SoundPool.load() 返回的是"音效ID(soundID)"，play() 必须用该 soundID，而不是资源ID(resId)。
+ * 关键：AudioAttributes 用 USAGE_MEDIA（媒体流），且【不请求音频焦点】，与音乐共存互不打断。
  */
 class MetronomePlayer(private val context: Context) {
 
     private var soundPool: SoundPool? = null
-    private var loaded = false
+    private val soundIds = mutableMapOf<Tone, Int>()
     private var volume = 0.8f
     private var currentTone: Tone = Tone.PLUCK
 
@@ -29,8 +28,7 @@ class MetronomePlayer(private val context: Context) {
                 .setAudioAttributes(attrs)
                 .setMaxStreams(3)
                 .build()
-            sp.setOnLoadCompleteListener { _, _, status -> if (status == 0) loaded = true }
-            Tone.entries.forEach { sp.load(context, it.resId, 1) }
+            Tone.entries.forEach { soundIds[it] = sp.load(context, it.resId, 1) }
             soundPool = sp
         }
     }
@@ -39,16 +37,16 @@ class MetronomePlayer(private val context: Context) {
         volume = v.coerceIn(0f, 1f)
     }
 
-    /** 触发一拍（均匀：所有拍同一音色）。 */
+    /** 触发一拍（均匀：所有拍同一音色）。用已加载的 soundID 播放。 */
     fun click() {
         val sp = soundPool ?: return
-        // 首次可能尚未加载完，等待后续拍即可
-        sp.play(currentTone.resId, volume, volume, 1, 0, 1f)
+        val id = soundIds[currentTone] ?: return
+        sp.play(id, volume, volume, 1, 0, 1f)
     }
 
     fun release() {
         soundPool?.release()
         soundPool = null
-        loaded = false
+        soundIds.clear()
     }
 }
