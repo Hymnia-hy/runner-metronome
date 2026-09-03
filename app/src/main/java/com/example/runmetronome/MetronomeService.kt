@@ -15,8 +15,7 @@ import android.os.PowerManager
 
 /**
  * 前台服务：保证锁屏 / 切后台时节拍不断。
- * 使用 mediaPlayback 类型的前台服务 + 常驻通知 + PARTIAL_WAKE_LOCK（保 CPU 计时，不亮屏）。
- * 节拍采用均匀模式（每拍同一音色，无重音）。
+ * 节拍以"长 PCM 无缝循环"方式播放（见 MetronomePlayer），无逐拍调度抖动、间隔绝对一致。
  */
 class MetronomeService : Service() {
 
@@ -29,11 +28,8 @@ class MetronomeService : Service() {
         const val EXTRA_TONE = "tone"
         const val EXTRA_VOLUME = "volume"
         const val EXTRA_TIMEOUT_MIN = "timeout_min"
-        const val EXTRA_ACCENT = "accent"
-        const val EXTRA_ROTATION = "rotation"
     }
 
-    private lateinit var engine: MetronomeEngine
     private lateinit var player: MetronomePlayer
     private val mainHandler = Handler(Looper.getMainLooper())
     private var wakeLock: PowerManager.WakeLock? = null
@@ -43,7 +39,6 @@ class MetronomeService : Service() {
     override fun onCreate() {
         super.onCreate()
         player = MetronomePlayer(this)
-        engine = MetronomeEngine { beatIndex, _ -> player.click(beatIndex) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -66,15 +61,12 @@ class MetronomeService : Service() {
         val volume = intent.getFloatExtra(EXTRA_VOLUME, 0.8f)
         val timeoutMin = intent.getIntExtra(EXTRA_TIMEOUT_MIN, 0)
         val toneName = intent.getStringExtra(EXTRA_TONE) ?: Tone.BUBBLE1.name
-        val rotation = intent.getBooleanExtra(EXTRA_ROTATION, false)
 
         startForeground(NOTIF_ID, buildNotification("节拍进行中 · ${bpm.toInt()} BPM"))
 
         tone = runCatching { Tone.valueOf(toneName) }.getOrDefault(Tone.BUBBLE1)
-        player.prepare(tone, volume, rotation)
-        engine.setBpm(bpm)
-        engine.setAccentEvery(0) // 均匀节拍
-        engine.start()
+        // 生成该 bpm 的"节拍长文件"并开始无缝循环播放（节拍点固定、零抖动）
+        player.prepare(bpm, tone, volume)
         acquireWakeLock()
 
         timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -90,7 +82,6 @@ class MetronomeService : Service() {
     }
 
     private fun stopEverything() {
-        engine.stop()
         player.release()
         timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
         timeoutRunnable = null
@@ -111,13 +102,10 @@ class MetronomeService : Service() {
     }
 
     private fun notifyFinished() {
-        // 到点提示音（用独立短播放器播放一段柔和提示音）
+        // 到点提示音（一次性柔和音）
         runCatching {
             val tmp = MetronomePlayer(this)
-            tmp.prepare(Tone.BUBBLE1, 1f, false)
-            tmp.click(0)
-            Thread.sleep(600)
-            tmp.release()
+            tmp.playBeep(Tone.BUBBLE1, 1f)
         }
         getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification("训练结束"))
     }
@@ -135,7 +123,7 @@ class MetronomeService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("跑者节拍器")
+            .setContentTitle("Runner Metronome")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentIntent(pi)

@@ -74,7 +74,6 @@ fun AppScreen() {
     var timeoutMin by remember { mutableIntStateOf(0) }
     var tone by remember { mutableStateOf(Tone.BUBBLE1) }
     var running by remember { mutableStateOf(false) }
-    var rotation by remember { mutableStateOf(false) }
 
     // 选音色即试听（独立提示音 SoundPool，不干扰节拍器）。注意：play 要用 load 返回的 soundID，而非 resId。
     val previewState = remember {
@@ -98,7 +97,7 @@ fun AppScreen() {
             .padding(20.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("跑者节拍器", style = MaterialTheme.typography.headlineSmall)
+        Text("Runner Metronome", style = MaterialTheme.typography.headlineSmall)
         Text(
             text = "${bpm.toInt()}",
             fontSize = 96.sp,
@@ -147,12 +146,6 @@ fun AppScreen() {
             }
         }
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("音色轮换（降低单调）", style = MaterialTheme.typography.titleSmall)
-            Spacer(Modifier.width(8.dp))
-            Switch(checked = rotation, onCheckedChange = { rotation = it })
-        }
-
         Spacer(Modifier.width(1.dp))
         Button(
             onClick = {
@@ -163,7 +156,6 @@ fun AppScreen() {
                     putExtra(MetronomeService.EXTRA_VOLUME, volume)
                     putExtra(MetronomeService.EXTRA_TIMEOUT_MIN, timeoutMin)
                     putExtra(MetronomeService.EXTRA_ACCENT, 4)
-                    putExtra(MetronomeService.EXTRA_ROTATION, rotation)
                 }
                 ContextCompat.startForegroundService(context, intent)
                 running = !running
