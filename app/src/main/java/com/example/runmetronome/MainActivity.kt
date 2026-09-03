@@ -4,31 +4,41 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
-import android.os.Bundle
 import android.media.AudioAttributes
 import android.media.SoundPool
+import android.os.Build
+import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -39,20 +49,47 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import kotlin.math.roundToInt
+
+// —— 设计规范配色 ——
+private val C_BG = Color(0xFF0A1426)
+private val C_SURFACE = Color(0xFF111D33)
+private val C_SURFACE2 = Color(0xFF182845)
+private val C_LINE = Color(0xFF22304D)
+private val C_ACCENT = Color(0xFF3DFF88)
+private val C_WARN = Color(0xFFFF6B35)
+private val C_TEXT = Color(0xFFF5F7FA)
+private val C_TEXT2 = Color(0xFF8A94A6)
+private val C_ON_ACCENT = Color(0xFF06281A)
+private val C_TONE_ON = Color(0xFF14352A)
+
+private val DarkColors = darkColorScheme(
+    primary = C_ACCENT,
+    onPrimary = C_ON_ACCENT,
+    background = C_BG,
+    onBackground = C_TEXT,
+    surface = C_SURFACE,
+    onSurface = C_TEXT,
+    surfaceVariant = C_SURFACE2,
+    onSurfaceVariant = C_TEXT2,
+    outline = C_LINE,
+    error = C_WARN,
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestNotificationPermission()
         setContent {
-            MaterialTheme {
-                AppScreen()
-            }
+            MaterialTheme(colorScheme = DarkColors) { AppScreen() }
         }
     }
 
@@ -65,7 +102,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AppScreen() {
     val context = LocalContext.current
@@ -76,16 +112,13 @@ fun AppScreen() {
     var tone by remember { mutableStateOf(Tone.BUBBLE1) }
     var status by remember { mutableStateOf(RunState.IDLE) }
 
-    // 选音色即试听（独立提示音 SoundPool，不干扰节拍器）。注意：play 要用 load 返回的 soundID，而非 resId。
+    // 选音色即试听
     val previewState = remember {
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
-        val sp = SoundPool.Builder()
-            .setAudioAttributes(attrs)
-            .setMaxStreams(1)
-            .build()
+        val sp = SoundPool.Builder().setAudioAttributes(attrs).setMaxStreams(1).build()
         val ids = mutableMapOf<Tone, Int>()
         Tone.entries.forEach { ids[it] = sp.load(context, it.resId, 1) }
         sp to ids
@@ -93,36 +126,52 @@ fun AppScreen() {
     DisposableEffect(Unit) { onDispose { previewState.first.release() } }
 
     Column(
-        modifier = Modifier
+        Modifier
             .fillMaxSize()
+            .background(C_BG)
             .padding(20.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Runner Metronome", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            text = "${bpm.toInt()}",
-            fontSize = 96.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.align(Alignment.CenterHorizontally)
-        )
-        Text("BPM", style = MaterialTheme.typography.titleMedium, modifier = Modifier.align(Alignment.CenterHorizontally))
-
-        SectionLabel("步频")
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Slider(
-                value = bpm,
-                onValueChange = { bpm = it },
-                valueRange = 110f..230f,
-                steps = 119,
-                modifier = Modifier.weight(1f)
-            )
-            Text("${bpm.toInt()}", modifier = Modifier.width(48.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+        // 顶栏
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(26.dp).background(C_SURFACE, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(10.dp).background(C_ACCENT, RoundedCornerShape(3.dp)))
+                }
+                Spacer(Modifier.width(10.dp))
+                Text("Runner Metronome", color = C_TEXT, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
         }
 
-        SectionLabel("节拍音量")
-        Slider(
-            value = volume,
-            onValueChange = {
+        Spacer(Modifier.height(18.dp))
+        // BPM 大数字
+        Text("CADENCE", color = C_TEXT2, fontSize = 13.sp, letterSpacing = 3.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.Center) {
+            Text(
+                "${bpm.toInt()}",
+                fontSize = 128.sp,
+                fontWeight = FontWeight.ExtraBold,
+                fontFamily = FontFamily.Monospace,
+                color = if (status == RunState.PLAYING) C_ACCENT else C_TEXT
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("BPM", color = C_ACCENT, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 22.dp))
+        }
+        // ± 步进器
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            StepperBtn("−") { bpm = (bpm - 1f).coerceIn(110f, 230f) }
+            Spacer(Modifier.width(14.dp))
+            StepperBtn("＋") { bpm = (bpm + 1f).coerceIn(110f, 230f) }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        // 步频
+        SliderCard(title = "步频范围", value = "${bpm.toInt()}", unit = "BPM") {
+            Slider(value = bpm, onValueChange = { bpm = it }, valueRange = 110f..230f, steps = 119)
+        }
+        // 音量（实时）
+        SliderCard(title = "节拍音量", value = "${(volume * 100).roundToInt()}", unit = "%") {
+            Slider(value = volume, onValueChange = {
                 volume = it
                 if (status != RunState.IDLE) {
                     val vi = Intent(context, MetronomeService::class.java).apply {
@@ -131,36 +180,27 @@ fun AppScreen() {
                     }
                     ContextCompat.startForegroundService(context, vi)
                 }
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
+            }, valueRange = 0f..1f)
+        }
+        // 倒计时
+        SliderCard(title = "训练倒计时", value = if (timeoutMin > 0) "$timeoutMin" else "不限", unit = if (timeoutMin > 0) "min" else "") {
+            Slider(value = timeoutMin.toFloat(), onValueChange = { timeoutMin = it.toInt() }, valueRange = 0f..300f, steps = 300)
+        }
 
-        SectionLabel("倒计时（分钟，0 = 不限时）")
-        Slider(
-            value = timeoutMin.toFloat(),
-            onValueChange = { timeoutMin = it.toInt() },
-            valueRange = 0f..300f,
-            steps = 300,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Text(if (timeoutMin > 0) "${timeoutMin} 分钟" else "不限时", style = MaterialTheme.typography.bodyMedium)
-
-        SectionLabel("音色")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Tone.entries.forEach { t ->
-                FilterChip(
-                    selected = tone == t,
-                    onClick = {
-                        tone = t
-                        val sid = previewState.second[t]
-                        if (sid != null) previewState.first.play(sid, 0.7f, 0.7f, 1, 0, 1f)
-                    },
-                    label = { Text(t.display) }
-                )
+        // 音色卡（横向滑动）
+        Spacer(Modifier.height(16.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(Tone.entries) { t ->
+                ToneCard(t, selected = tone == t, onClick = {
+                    tone = t
+                    val sid = previewState.second[t]
+                    if (sid != null) previewState.first.play(sid, 0.7f, 0.7f, 1, 0, 1f)
+                })
             }
         }
 
-        Spacer(Modifier.width(1.dp))
+        Spacer(Modifier.height(24.dp))
+        // 开始/暂停
         Button(
             onClick = {
                 when (status) {
@@ -169,33 +209,88 @@ fun AppScreen() {
                     RunState.PAUSED -> { sendAction(context, MetronomeService.ACTION_RESUME); status = RunState.PLAYING }
                 }
             },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 24.dp)
+            modifier = Modifier.fillMaxWidth().height(64.dp),
+            shape = RoundedCornerShape(20.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (status == RunState.PLAYING) C_SURFACE2 else C_ACCENT,
+                contentColor = if (status == RunState.PLAYING) C_TEXT else C_ON_ACCENT
+            )
         ) {
-            Text(if (status == RunState.PLAYING) "暂停" else "开始", fontSize = 20.sp)
+            Text(if (status == RunState.PLAYING) "暂停" else "开始", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
         }
-        Button(
+        Spacer(Modifier.height(12.dp))
+        // 停止/复位
+        OutlinedButton(
             onClick = {
                 if (status != RunState.IDLE) sendAction(context, MetronomeService.ACTION_STOP)
                 status = RunState.IDLE
             },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 12.dp)
+            modifier = Modifier.fillMaxWidth().height(64.dp),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, C_LINE),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = C_WARN)
         ) {
-            Text("停止 / 复位", fontSize = 20.sp)
+            Text("停止 / 复位", fontSize = 19.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
 
 @Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleSmall,
-        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
-    )
+private fun StepperBtn(label: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = C_SURFACE,
+        border = BorderStroke(1.dp, C_LINE),
+        modifier = Modifier.size(56.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(label, color = C_TEXT, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun SliderCard(title: String, value: String, unit: String, slider: @Composable () -> Unit) {
+    Card(
+        Modifier.fillMaxWidth().padding(top = 14.dp),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = C_SURFACE),
+        border = BorderStroke(1.dp, C_LINE)
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(title, color = C_TEXT2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(if (unit.isEmpty()) value else "$value $unit", color = C_TEXT, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(8.dp))
+            slider()
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ToneCard(t: Tone, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(18.dp),
+        color = if (selected) C_TONE_ON else C_SURFACE,
+        border = BorderStroke(1.5.dp, if (selected) C_ACCENT else C_LINE),
+        modifier = Modifier.width(96.dp)
+    ) {
+        Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier.size(48.dp).background(if (selected) C_ACCENT else C_SURFACE2, RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(t.display.first().toString(), color = if (selected) C_ON_ACCENT else C_TEXT, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(t.display, color = C_TEXT, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+            Text(t.desc, color = C_TEXT2, fontSize = 10.5.sp, textAlign = TextAlign.Center)
+        }
+    }
 }
 
 enum class RunState { IDLE, PLAYING, PAUSED }
