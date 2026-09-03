@@ -37,7 +37,7 @@ class MetronomeService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var wakeLock: PowerManager.WakeLock? = null
     private var timeoutRunnable: Runnable? = null
-    private var tone: Tone = Tone.PLUCK
+    private var tone: Tone = Tone.BUBBLE1
 
     override fun onCreate() {
         super.onCreate()
@@ -64,11 +64,11 @@ class MetronomeService : Service() {
         val bpm = intent.getDoubleExtra(EXTRA_BPM, 180.0)
         val volume = intent.getFloatExtra(EXTRA_VOLUME, 0.8f)
         val timeoutMin = intent.getIntExtra(EXTRA_TIMEOUT_MIN, 0)
-        val toneName = intent.getStringExtra(EXTRA_TONE) ?: Tone.PLUCK.name
+        val toneName = intent.getStringExtra(EXTRA_TONE) ?: Tone.BUBBLE1.name
 
         startForeground(NOTIF_ID, buildNotification("节拍进行中 · ${bpm.toInt()} BPM"))
 
-        tone = runCatching { Tone.valueOf(toneName) }.getOrDefault(Tone.PLUCK)
+        tone = runCatching { Tone.valueOf(toneName) }.getOrDefault(Tone.BUBBLE1)
         player.prepare(tone, volume)
         engine.setBpm(bpm)
         engine.setAccentEvery(0) // 均匀节拍
@@ -112,7 +112,7 @@ class MetronomeService : Service() {
         // 到点提示音（用独立短播放器播放一段柔和提示音）
         runCatching {
             val tmp = MetronomePlayer(this)
-            tmp.prepare(Tone.SINE, 1f)
+            tmp.prepare(Tone.BUBBLE1, 1f)
             tmp.click()
             Thread.sleep(600)
             tmp.release()

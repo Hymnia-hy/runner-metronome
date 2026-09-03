@@ -14,7 +14,7 @@ class MetronomePlayer(private val context: Context) {
     private var soundPool: SoundPool? = null
     private val soundIds = mutableMapOf<Tone, Int>()
     private var volume = 0.8f
-    private var currentTone: Tone = Tone.PLUCK
+    private var currentTone: Tone = Tone.BUBBLE1
 
     fun prepare(tone: Tone, volume: Float) {
         this.volume = volume.coerceIn(0f, 1f)
