@@ -154,7 +154,7 @@ fun AppScreen() {
                 modifier = Modifier.size(44.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Image(painterResource(R.drawable.ic_volume), Modifier.size(20.dp))
+                    Image(painterResource(R.drawable.ic_volume), null, Modifier.size(20.dp))
                 }
             }
         }
