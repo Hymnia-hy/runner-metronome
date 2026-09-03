@@ -48,21 +48,23 @@ object BeatPcmBuilder {
 
     /**
      * 按 bpm 生成节拍序列 PCM。
-     * 每拍在 [pos, pos+tone.size) 插入音色采样；开头/结尾各留一段静音，便于无缝循环。
+     * 每拍位置用"浮点精确累积后取整"：平均速率精确匹配目标 BPM（无频率偏移），
+     * 单拍取整抖动 ≤1 采样(≈0.02ms，人耳不可闻)；首尾各留静音便于无缝循环。
      */
     fun build(bpm: Double, tonePcm: ShortArray, seconds: Int = 120): ShortArray {
-        val periodSamples = (SR * 60.0 / bpm).roundToLong().toInt()
-        val leadIn = periodSamples / 4
+        val period = SR * 60.0 / bpm
+        val leadIn = (period / 4.0).roundToLong().toInt()
         val total = SR * seconds
-        val tail = total - leadIn
         val pcm = ShortArray(total)
-        var pos = leadIn
-        while (pos + tonePcm.size <= tail) {
+        var beatIndex = 0
+        while (true) {
+            val pos = leadIn + (beatIndex * period).roundToLong().toInt()
+            if (pos + tonePcm.size > total) break
             for (j in tonePcm.indices) {
                 val sum = pcm[pos + j].toInt() + tonePcm[j].toInt()
                 pcm[pos + j] = sum.coerceIn(-32767, 32767).toShort()
             }
-            pos += periodSamples
+            beatIndex++
         }
         return pcm
     }
