@@ -1,16 +1,12 @@
 package com.example.runmetronome
 
 /**
- * 音效种类：真实音频采样（16bit PCM，内置 res/raw），用 SoundPool 播放。
- * 前 4 款来自开源节拍器 Kr0oked/Metronome(GPL-3.0)；后 4 款来自 de.moekadu.metronome(thetwom/toc2, GPL-3.0)。
+ * 音效种类：柔和、耐听的音色，适合长时间（如马拉松 4 小时）持续听、不厌烦。
+ * 素材：BigSoundBank(CC0 公有领域) 的水泡破裂与跑步脚下触地声，已提取单瞬态、转 16bit PCM 内置。
  */
 enum class Tone(val display: String, val desc: String, val resId: Int) {
-    PLUCK("拨弦·清脆", "清脆明亮，近木琴/吉他", R.raw.tone_pluck_strong),
-    SINE("正弦·柔和", "圆润柔和纯音", R.raw.tone_sine_strong),
-    SQUARE("方波·电子", "电子感强", R.raw.tone_square_strong),
-    RISSET("鼓点", "鼓点感强", R.raw.tone_risset_strong),
-    CLAVES("响板·咔哒", "清脆响板", R.raw.tone_claves),
-    WOODBLOCK("木鱼", "清脆木鱼", R.raw.tone_woodblock),
-    STICKS("鼓棒", "清脆棒击", R.raw.tone_sticks),
-    BASE("底鼓", "低频底鼓", R.raw.tone_base),
+    BUBBLE1("气泡·柔", "柔和气泡破裂", R.raw.tone_bubble1),
+    BUBBLE2("气泡·轻", "轻柔气泡", R.raw.tone_bubble2),
+    BUBBLE3("气泡·缓", "舒缓气泡", R.raw.tone_bubble3),
+    FOOTSTEP("脚步·沉", "跑步脚下触地", R.raw.tone_footstep),
 }

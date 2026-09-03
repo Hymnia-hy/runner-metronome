@@ -71,7 +71,7 @@ fun AppScreen() {
     var bpm by remember { mutableFloatStateOf(180f) }
     var volume by remember { mutableFloatStateOf(0.8f) }
     var timeoutMin by remember { mutableIntStateOf(0) }
-    var tone by remember { mutableStateOf(Tone.PLUCK) }
+    var tone by remember { mutableStateOf(Tone.BUBBLE1) }
     var running by remember { mutableStateOf(false) }
 
     // 选音色即试听（独立提示音 SoundPool，不干扰节拍器）。注意：play 要用 load 返回的 soundID，而非 resId。
