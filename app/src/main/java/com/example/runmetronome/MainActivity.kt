@@ -155,7 +155,6 @@ fun AppScreen() {
                     putExtra(MetronomeService.EXTRA_TONE, tone.name)
                     putExtra(MetronomeService.EXTRA_VOLUME, volume)
                     putExtra(MetronomeService.EXTRA_TIMEOUT_MIN, timeoutMin)
-                    putExtra(MetronomeService.EXTRA_ACCENT, 4)
                 }
                 ContextCompat.startForegroundService(context, intent)
                 running = !running
