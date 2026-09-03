@@ -1,6 +1,7 @@
 package com.example.runmetronome
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -70,10 +71,10 @@ fun AppScreen() {
     val context = LocalContext.current
 
     var bpm by remember { mutableFloatStateOf(180f) }
-    var volume by remember { mutableFloatStateOf(0.8f) }
+    var volume by remember { mutableFloatStateOf(1.0f) }
     var timeoutMin by remember { mutableIntStateOf(0) }
     var tone by remember { mutableStateOf(Tone.BUBBLE1) }
-    var running by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf(RunState.IDLE) }
 
     // 选音色即试听（独立提示音 SoundPool，不干扰节拍器）。注意：play 要用 load 返回的 soundID，而非 resId。
     val previewState = remember {
@@ -111,22 +112,35 @@ fun AppScreen() {
             Slider(
                 value = bpm,
                 onValueChange = { bpm = it },
-                valueRange = 120f..220f,
-                steps = 99,
+                valueRange = 110f..230f,
+                steps = 119,
                 modifier = Modifier.weight(1f)
             )
             Text("${bpm.toInt()}", modifier = Modifier.width(48.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
         }
 
         SectionLabel("节拍音量")
-        Slider(value = volume, onValueChange = { volume = it }, modifier = Modifier.fillMaxWidth())
+        Slider(
+            value = volume,
+            onValueChange = {
+                volume = it
+                if (status != RunState.IDLE) {
+                    val vi = Intent(context, MetronomeService::class.java).apply {
+                        action = MetronomeService.ACTION_VOLUME
+                        putExtra(MetronomeService.EXTRA_VOLUME, it)
+                    }
+                    ContextCompat.startForegroundService(context, vi)
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
 
         SectionLabel("倒计时（分钟，0 = 不限时）")
         Slider(
             value = timeoutMin.toFloat(),
             onValueChange = { timeoutMin = it.toInt() },
-            valueRange = 0f..90f,
-            steps = 90,
+            valueRange = 0f..300f,
+            steps = 300,
             modifier = Modifier.fillMaxWidth()
         )
         Text(if (timeoutMin > 0) "${timeoutMin} 分钟" else "不限时", style = MaterialTheme.typography.bodyMedium)
@@ -149,21 +163,28 @@ fun AppScreen() {
         Spacer(Modifier.width(1.dp))
         Button(
             onClick = {
-                val intent = Intent(context, MetronomeService::class.java).apply {
-                    action = if (running) MetronomeService.ACTION_STOP else MetronomeService.ACTION_START
-                    putExtra(MetronomeService.EXTRA_BPM, bpm.toDouble())
-                    putExtra(MetronomeService.EXTRA_TONE, tone.name)
-                    putExtra(MetronomeService.EXTRA_VOLUME, volume)
-                    putExtra(MetronomeService.EXTRA_TIMEOUT_MIN, timeoutMin)
+                when (status) {
+                    RunState.IDLE -> { sendStart(context, bpm, tone, volume, timeoutMin); status = RunState.PLAYING }
+                    RunState.PLAYING -> { sendAction(context, MetronomeService.ACTION_PAUSE); status = RunState.PAUSED }
+                    RunState.PAUSED -> { sendAction(context, MetronomeService.ACTION_RESUME); status = RunState.PLAYING }
                 }
-                ContextCompat.startForegroundService(context, intent)
-                running = !running
             },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 24.dp)
         ) {
-            Text(if (running) "停止" else "开始", fontSize = 20.sp)
+            Text(if (status == RunState.PLAYING) "暂停" else "开始", fontSize = 20.sp)
+        }
+        Button(
+            onClick = {
+                if (status != RunState.IDLE) sendAction(context, MetronomeService.ACTION_STOP)
+                status = RunState.IDLE
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp)
+        ) {
+            Text("停止 / 复位", fontSize = 20.sp)
         }
     }
 }
@@ -175,4 +196,22 @@ private fun SectionLabel(text: String) {
         style = MaterialTheme.typography.titleSmall,
         modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
     )
+}
+
+enum class RunState { IDLE, PLAYING, PAUSED }
+
+private fun sendAction(context: Context, action: String) {
+    val i = Intent(context, MetronomeService::class.java).apply { this.action = action }
+    ContextCompat.startForegroundService(context, i)
+}
+
+private fun sendStart(context: Context, bpm: Float, tone: Tone, volume: Float, timeoutMin: Int) {
+    val i = Intent(context, MetronomeService::class.java).apply {
+        action = MetronomeService.ACTION_START
+        putExtra(MetronomeService.EXTRA_BPM, bpm.toDouble())
+        putExtra(MetronomeService.EXTRA_TONE, tone.name)
+        putExtra(MetronomeService.EXTRA_VOLUME, volume)
+        putExtra(MetronomeService.EXTRA_TIMEOUT_MIN, timeoutMin)
+    }
+    ContextCompat.startForegroundService(context, i)
 }

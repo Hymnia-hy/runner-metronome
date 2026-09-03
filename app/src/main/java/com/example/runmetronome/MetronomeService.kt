@@ -16,14 +16,19 @@ import android.os.PowerManager
 /**
  * 前台服务：保证锁屏 / 切后台时节拍不断。
  * 节拍以"长 PCM 无缝循环"方式播放（见 MetronomePlayer），无逐拍调度抖动、间隔绝对一致。
+ * 支持：实时音量、暂停/继续、5 小时倒计时、每 15 分钟报时。
  */
 class MetronomeService : Service() {
 
     companion object {
         private const val CHANNEL_ID = "run_metronome"
         private const val NOTIF_ID = 1
+        private const val ANNOUNCE_INTERVAL_MS = 15 * 60 * 1000L
         const val ACTION_START = "com.example.runmetronome.START"
         const val ACTION_STOP = "com.example.runmetronome.STOP"
+        const val ACTION_PAUSE = "com.example.runmetronome.PAUSE"
+        const val ACTION_RESUME = "com.example.runmetronome.RESUME"
+        const val ACTION_VOLUME = "com.example.runmetronome.VOLUME"
         const val EXTRA_BPM = "bpm"
         const val EXTRA_TONE = "tone"
         const val EXTRA_VOLUME = "volume"
@@ -34,7 +39,9 @@ class MetronomeService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var wakeLock: PowerManager.WakeLock? = null
     private var timeoutRunnable: Runnable? = null
+    private var announceRunnable: Runnable? = null
     private var tone: Tone = Tone.BUBBLE1
+    private var timeoutMin = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -49,27 +56,29 @@ class MetronomeService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_START -> startMetronome(intent)
-            else -> {
-                // 系统重建导致的重启，保持运行基数
-            }
+            ACTION_PAUSE -> player.pause()
+            ACTION_RESUME -> player.resume()
+            ACTION_VOLUME -> player.setVolume(intent.getFloatExtra(EXTRA_VOLUME, 1f))
+            else -> {}
         }
         return START_STICKY
     }
 
     private fun startMetronome(intent: Intent) {
         val bpm = intent.getDoubleExtra(EXTRA_BPM, 180.0)
-        val volume = intent.getFloatExtra(EXTRA_VOLUME, 0.8f)
-        val timeoutMin = intent.getIntExtra(EXTRA_TIMEOUT_MIN, 0)
+        val volume = intent.getFloatExtra(EXTRA_VOLUME, 1f)
+        timeoutMin = intent.getIntExtra(EXTRA_TIMEOUT_MIN, 0).coerceIn(0, 300)
         val toneName = intent.getStringExtra(EXTRA_TONE) ?: Tone.BUBBLE1.name
 
         startForeground(NOTIF_ID, buildNotification("节拍进行中 · ${bpm.toInt()} BPM"))
 
         tone = runCatching { Tone.valueOf(toneName) }.getOrDefault(Tone.BUBBLE1)
-        // 生成该 bpm 的"节拍长文件"并开始无缝循环播放（节拍点固定、零抖动）
         player.prepare(bpm, tone, volume)
         acquireWakeLock()
 
         timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        announceRunnable?.let { mainHandler.removeCallbacks(it) }
+
         if (timeoutMin > 0) {
             val r = Runnable {
                 stopEverything()
@@ -78,13 +87,34 @@ class MetronomeService : Service() {
             }
             timeoutRunnable = r
             mainHandler.postDelayed(r, timeoutMin * 60_000L)
+            scheduleAnnouncements()
         }
+    }
+
+    /** 每 15 分钟报时一次，直到倒计时结束。 */
+    private fun scheduleAnnouncements() {
+        val r = object : Runnable {
+            var minute = 15
+            override fun run() {
+                if (minute > timeoutMin) return
+                Thread {
+                    runCatching { MetronomePlayer(this@MetronomeService).playBeep(Tone.BUBBLE2, 1f) }
+                }.start()
+                getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification("已进行 $minute 分钟"))
+                minute += 15
+                mainHandler.postDelayed(this, ANNOUNCE_INTERVAL_MS)
+            }
+        }
+        announceRunnable = r
+        mainHandler.postDelayed(r, ANNOUNCE_INTERVAL_MS)
     }
 
     private fun stopEverything() {
         player.release()
         timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        announceRunnable?.let { mainHandler.removeCallbacks(it) }
         timeoutRunnable = null
+        announceRunnable = null
         releaseWakeLock()
     }
 
@@ -92,7 +122,7 @@ class MetronomeService : Service() {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RunMetronome::beat").apply {
             setReferenceCounted(false)
-            acquire(60 * 60 * 1000L)
+            acquire(5 * 60 * 60 * 1000L)
         }
     }
 
@@ -102,11 +132,9 @@ class MetronomeService : Service() {
     }
 
     private fun notifyFinished() {
-        // 到点提示音（一次性柔和音）
-        runCatching {
-            val tmp = MetronomePlayer(this)
-            tmp.playBeep(Tone.BUBBLE1, 1f)
-        }
+        Thread {
+            runCatching { MetronomePlayer(this@MetronomeService).playBeep(Tone.BUBBLE1, 1f) }
+        }.start()
         getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification("训练结束"))
     }
 

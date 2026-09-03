@@ -9,5 +9,4 @@ enum class Tone(val display: String, val desc: String, val resId: Int) {
     BUBBLE2("气泡·轻", "轻柔气泡", R.raw.tone_bubble2),
     BUBBLE3("气泡·缓", "舒缓气泡", R.raw.tone_bubble3),
     FOOTSTEP("脚步·沉", "跑步脚下触地", R.raw.tone_footstep),
-    FOOTSTEP2("脚步·精英", "跑鞋/碳板落地", R.raw.tone_footstep2),
 }
