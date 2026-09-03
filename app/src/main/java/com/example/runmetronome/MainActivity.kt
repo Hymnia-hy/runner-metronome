@@ -26,6 +26,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -73,6 +74,7 @@ fun AppScreen() {
     var timeoutMin by remember { mutableIntStateOf(0) }
     var tone by remember { mutableStateOf(Tone.BUBBLE1) }
     var running by remember { mutableStateOf(false) }
+    var rotation by remember { mutableStateOf(false) }
 
     // 选音色即试听（独立提示音 SoundPool，不干扰节拍器）。注意：play 要用 load 返回的 soundID，而非 resId。
     val previewState = remember {
@@ -145,6 +147,12 @@ fun AppScreen() {
             }
         }
 
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("音色轮换（降低单调）", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.width(8.dp))
+            Switch(checked = rotation, onCheckedChange = { rotation = it })
+        }
+
         Spacer(Modifier.width(1.dp))
         Button(
             onClick = {
@@ -155,6 +163,7 @@ fun AppScreen() {
                     putExtra(MetronomeService.EXTRA_VOLUME, volume)
                     putExtra(MetronomeService.EXTRA_TIMEOUT_MIN, timeoutMin)
                     putExtra(MetronomeService.EXTRA_ACCENT, 4)
+                    putExtra(MetronomeService.EXTRA_ROTATION, rotation)
                 }
                 ContextCompat.startForegroundService(context, intent)
                 running = !running

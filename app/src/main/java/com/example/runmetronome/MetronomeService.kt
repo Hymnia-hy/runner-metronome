@@ -30,6 +30,7 @@ class MetronomeService : Service() {
         const val EXTRA_VOLUME = "volume"
         const val EXTRA_TIMEOUT_MIN = "timeout_min"
         const val EXTRA_ACCENT = "accent"
+        const val EXTRA_ROTATION = "rotation"
     }
 
     private lateinit var engine: MetronomeEngine
@@ -42,7 +43,7 @@ class MetronomeService : Service() {
     override fun onCreate() {
         super.onCreate()
         player = MetronomePlayer(this)
-        engine = MetronomeEngine { _, _ -> player.click() }
+        engine = MetronomeEngine { beatIndex, _ -> player.click(beatIndex) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -65,11 +66,12 @@ class MetronomeService : Service() {
         val volume = intent.getFloatExtra(EXTRA_VOLUME, 0.8f)
         val timeoutMin = intent.getIntExtra(EXTRA_TIMEOUT_MIN, 0)
         val toneName = intent.getStringExtra(EXTRA_TONE) ?: Tone.BUBBLE1.name
+        val rotation = intent.getBooleanExtra(EXTRA_ROTATION, false)
 
         startForeground(NOTIF_ID, buildNotification("节拍进行中 · ${bpm.toInt()} BPM"))
 
         tone = runCatching { Tone.valueOf(toneName) }.getOrDefault(Tone.BUBBLE1)
-        player.prepare(tone, volume)
+        player.prepare(tone, volume, rotation)
         engine.setBpm(bpm)
         engine.setAccentEvery(0) // 均匀节拍
         engine.start()
@@ -112,8 +114,8 @@ class MetronomeService : Service() {
         // 到点提示音（用独立短播放器播放一段柔和提示音）
         runCatching {
             val tmp = MetronomePlayer(this)
-            tmp.prepare(Tone.BUBBLE1, 1f)
-            tmp.click()
+            tmp.prepare(Tone.BUBBLE1, 1f, false)
+            tmp.click(0)
             Thread.sleep(600)
             tmp.release()
         }
