@@ -98,7 +98,7 @@ class MetronomeService : Service() {
             override fun run() {
                 if (minute > timeoutMin) return
                 Thread {
-                    runCatching { MetronomePlayer(this@MetronomeService).playBeep(Tone.BUBBLE2, 1f) }
+                    runCatching { MetronomePlayer(this@MetronomeService).playBeep(Tone.BUBBLE1, 1f) }
                 }.start()
                 getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification("已进行 $minute 分钟"))
                 minute += 15

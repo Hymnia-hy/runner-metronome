@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -38,6 +39,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -111,8 +113,8 @@ fun AppScreen() {
     var timeoutMin by remember { mutableIntStateOf(0) }
     var tone by remember { mutableStateOf(Tone.BUBBLE1) }
     var status by remember { mutableStateOf(RunState.IDLE) }
+    var showVolume by remember { mutableStateOf(false) }
 
-    // 选音色即试听
     val previewState = remember {
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
@@ -132,7 +134,7 @@ fun AppScreen() {
             .padding(20.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        // 顶栏
+        // 顶栏：品牌 + 右上角音量键
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(26.dp).background(C_SURFACE, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
@@ -140,6 +142,18 @@ fun AppScreen() {
                 }
                 Spacer(Modifier.width(10.dp))
                 Text("Runner Metronome", color = C_TEXT, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+            // 音量键：点击弹出音量调节
+            Surface(
+                onClick = { showVolume = true },
+                shape = RoundedCornerShape(12.dp),
+                color = C_SURFACE,
+                border = BorderStroke(1.dp, C_LINE),
+                modifier = Modifier.size(44.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text("🔊", fontSize = 18.sp)
+                }
             }
         }
 
@@ -157,7 +171,6 @@ fun AppScreen() {
             Spacer(Modifier.width(8.dp))
             Text("BPM", color = C_ACCENT, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 22.dp))
         }
-        // ± 步进器
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
             StepperBtn("−") { bpm = (bpm - 1f).coerceIn(110f, 230f) }
             Spacer(Modifier.width(14.dp))
@@ -165,29 +178,14 @@ fun AppScreen() {
         }
 
         Spacer(Modifier.height(16.dp))
-        // 步频
         SliderCard(title = "步频范围", value = "${bpm.toInt()}", unit = "BPM") {
             Slider(value = bpm, onValueChange = { bpm = it }, valueRange = 110f..230f, steps = 119)
         }
-        // 音量（实时）
-        SliderCard(title = "节拍音量", value = "${(volume * 100).roundToInt()}", unit = "%") {
-            Slider(value = volume, onValueChange = {
-                volume = it
-                if (status != RunState.IDLE) {
-                    val vi = Intent(context, MetronomeService::class.java).apply {
-                        action = MetronomeService.ACTION_VOLUME
-                        putExtra(MetronomeService.EXTRA_VOLUME, it)
-                    }
-                    ContextCompat.startForegroundService(context, vi)
-                }
-            }, valueRange = 0f..1f)
-        }
-        // 倒计时
         SliderCard(title = "训练倒计时", value = if (timeoutMin > 0) "$timeoutMin" else "不限", unit = if (timeoutMin > 0) "min" else "") {
             Slider(value = timeoutMin.toFloat(), onValueChange = { timeoutMin = it.toInt() }, valueRange = 0f..300f, steps = 300)
         }
 
-        // 音色卡（横向滑动）
+        // 音色卡（横向滑动，无描述小字）
         Spacer(Modifier.height(16.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(Tone.entries) { t ->
@@ -200,38 +198,61 @@ fun AppScreen() {
         }
 
         Spacer(Modifier.height(24.dp))
-        // 开始/暂停
-        Button(
-            onClick = {
-                when (status) {
-                    RunState.IDLE -> { sendStart(context, bpm, tone, volume, timeoutMin); status = RunState.PLAYING }
-                    RunState.PLAYING -> { sendAction(context, MetronomeService.ACTION_PAUSE); status = RunState.PAUSED }
-                    RunState.PAUSED -> { sendAction(context, MetronomeService.ACTION_RESUME); status = RunState.PLAYING }
-                }
-            },
-            modifier = Modifier.fillMaxWidth().height(64.dp),
-            shape = RoundedCornerShape(20.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (status == RunState.PLAYING) C_SURFACE2 else C_ACCENT,
-                contentColor = if (status == RunState.PLAYING) C_TEXT else C_ON_ACCENT
-            )
-        ) {
-            Text(if (status == RunState.PLAYING) "暂停" else "开始", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+        // 主按钮 + 停止，同一行
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Button(
+                onClick = {
+                    when (status) {
+                        RunState.IDLE -> { sendStart(context, bpm, tone, volume, timeoutMin); status = RunState.PLAYING }
+                        RunState.PLAYING -> { sendAction(context, MetronomeService.ACTION_PAUSE); status = RunState.PAUSED }
+                        RunState.PAUSED -> { sendAction(context, MetronomeService.ACTION_RESUME); status = RunState.PLAYING }
+                    }
+                },
+                modifier = Modifier.weight(1f).height(64.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (status == RunState.PLAYING) C_SURFACE2 else C_ACCENT,
+                    contentColor = if (status == RunState.PLAYING) C_TEXT else C_ON_ACCENT
+                )
+            ) {
+                Text(if (status == RunState.PLAYING) "暂停" else "开始", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+            }
+            OutlinedButton(
+                onClick = {
+                    if (status != RunState.IDLE) sendAction(context, MetronomeService.ACTION_STOP)
+                    status = RunState.IDLE
+                },
+                modifier = Modifier.width(96.dp).height(64.dp),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.dp, C_LINE),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = C_WARN)
+            ) {
+                Text("停止", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
         }
-        Spacer(Modifier.height(12.dp))
-        // 停止/复位
-        OutlinedButton(
-            onClick = {
-                if (status != RunState.IDLE) sendAction(context, MetronomeService.ACTION_STOP)
-                status = RunState.IDLE
-            },
-            modifier = Modifier.fillMaxWidth().height(64.dp),
-            shape = RoundedCornerShape(20.dp),
-            border = BorderStroke(1.dp, C_LINE),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = C_WARN)
-        ) {
-            Text("停止 / 复位", fontSize = 19.sp, fontWeight = FontWeight.Bold)
-        }
+    }
+
+    // 音量弹窗（右上角音量键唤起）
+    if (showVolume) {
+        AlertDialog(
+            onDismissRequest = { showVolume = false },
+            confirmButton = { TextButton(onClick = { showVolume = false }) { Text("完成", color = C_ACCENT) } },
+            containerColor = C_SURFACE,
+            titleContentColor = C_TEXT,
+            title = { Text("节拍音量") },
+            text = {
+                Slider(value = volume, onValueChange = {
+                    volume = it
+                    if (status != RunState.IDLE) {
+                        val vi = Intent(context, MetronomeService::class.java).apply {
+                            action = MetronomeService.ACTION_VOLUME
+                            putExtra(MetronomeService.EXTRA_VOLUME, it)
+                        }
+                        ContextCompat.startForegroundService(context, vi)
+                    }
+                }, valueRange = 0f..1f)
+            }
+        )
     }
 }
 
@@ -288,7 +309,6 @@ private fun ToneCard(t: Tone, selected: Boolean, onClick: () -> Unit) {
             }
             Spacer(Modifier.height(8.dp))
             Text(t.display, color = C_TEXT, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-            Text(t.desc, color = C_TEXT2, fontSize = 10.5.sp, textAlign = TextAlign.Center)
         }
     }
 }
