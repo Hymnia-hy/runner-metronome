@@ -114,7 +114,6 @@ fun AppScreen() {
     var timeoutMin by remember { mutableIntStateOf(0) }
     var tone by remember { mutableStateOf(Tone.BUBBLE1) }
     var status by remember { mutableStateOf(RunState.IDLE) }
-    var showVolume by remember { mutableStateOf(false) }
 
     val previewState = remember {
         val attrs = AudioAttributes.Builder()
@@ -137,11 +136,6 @@ fun AppScreen() {
                 }
                 Spacer(Modifier.width(8.dp))
                 Text("Runner Metronome", color = C_TEXT, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            }
-            Surface(onClick = { showVolume = true }, shape = RoundedCornerShape(12.dp), color = C_SURFACE, border = BorderStroke(1.dp, C_LINE), modifier = Modifier.size(40.dp)) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(painterResource(R.drawable.ic_volume), null, Modifier.size(20.dp), tint = C_TEXT2)
-                }
             }
         }
 
@@ -169,6 +163,18 @@ fun AppScreen() {
         }
         SliderCard(title = "训练倒计时", value = if (timeoutMin > 0) "$timeoutMin" else "不限", unit = if (timeoutMin > 0) "min" else "", iconRes = R.drawable.ic_timer) {
             Slider(value = timeoutMin.toFloat(), onValueChange = { timeoutMin = it.toInt() }, valueRange = 0f..300f, steps = 300, modifier = Modifier.height(36.dp))
+        }
+        SliderCard(title = "节拍音量", value = "${(volume * 100).roundToInt()}", unit = "%", iconRes = R.drawable.ic_volume) {
+            Slider(value = volume, onValueChange = {
+                volume = it
+                if (status != RunState.IDLE) {
+                    val vi = Intent(context, MetronomeService::class.java).apply {
+                        action = MetronomeService.ACTION_VOLUME
+                        putExtra(MetronomeService.EXTRA_VOLUME, it)
+                    }
+                    ContextCompat.startForegroundService(context, vi)
+                }
+            }, valueRange = 0f..1f, modifier = Modifier.height(36.dp))
         }
 
         // 音色卡
@@ -222,28 +228,6 @@ fun AppScreen() {
                 }
             }
         }
-    }
-
-    if (showVolume) {
-        AlertDialog(
-            onDismissRequest = { showVolume = false },
-            confirmButton = { TextButton(onClick = { showVolume = false }) { Text("完成", color = C_ACCENT) } },
-            containerColor = C_SURFACE,
-            titleContentColor = C_TEXT,
-            title = { Text("节拍音量") },
-            text = {
-                Slider(value = volume, onValueChange = {
-                    volume = it
-                    if (status != RunState.IDLE) {
-                        val vi = Intent(context, MetronomeService::class.java).apply {
-                            action = MetronomeService.ACTION_VOLUME
-                            putExtra(MetronomeService.EXTRA_VOLUME, it)
-                        }
-                        ContextCompat.startForegroundService(context, vi)
-                    }
-                }, valueRange = 0f..1f)
-            }
-        )
     }
 }
 
