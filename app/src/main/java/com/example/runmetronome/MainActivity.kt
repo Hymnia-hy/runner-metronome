@@ -26,15 +26,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -129,67 +128,52 @@ fun AppScreen() {
     }
     DisposableEffect(Unit) { onDispose { previewState.first.release() } }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(C_BG)
-            .padding(20.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
+    Column(Modifier.fillMaxSize().background(C_BG).padding(16.dp)) {
         // 顶栏：品牌 + 右上角音量键
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(26.dp).background(C_SURFACE, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
-                    Box(Modifier.size(10.dp).background(C_ACCENT, RoundedCornerShape(3.dp)))
+                Box(Modifier.size(24.dp).background(C_SURFACE, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(9.dp).background(C_ACCENT, RoundedCornerShape(3.dp)))
                 }
-                Spacer(Modifier.width(10.dp))
-                Text("Runner Metronome", color = C_TEXT, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(8.dp))
+                Text("Runner Metronome", color = C_TEXT, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             }
-            // 音量键：点击弹出音量调节
-            Surface(
-                onClick = { showVolume = true },
-                shape = RoundedCornerShape(12.dp),
-                color = C_SURFACE,
-                border = BorderStroke(1.dp, C_LINE),
-                modifier = Modifier.size(44.dp)
-            ) {
+            Surface(onClick = { showVolume = true }, shape = RoundedCornerShape(12.dp), color = C_SURFACE, border = BorderStroke(1.dp, C_LINE), modifier = Modifier.size(40.dp)) {
                 Box(contentAlignment = Alignment.Center) {
-                    Image(painterResource(R.drawable.ic_volume), null, Modifier.size(20.dp))
+                    Icon(painterResource(R.drawable.ic_volume), null, Modifier.size(20.dp), tint = C_TEXT2)
                 }
             }
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(10.dp))
         // BPM 大数字
-        Text("CADENCE", color = C_TEXT2, fontSize = 13.sp, letterSpacing = 3.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        Text("CADENCE", color = C_TEXT2, fontSize = 12.sp, letterSpacing = 3.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.Center) {
             Text(
                 "${bpm.toInt()}",
-                fontSize = 128.sp,
-                fontWeight = FontWeight.ExtraBold,
-                fontFamily = FontFamily.Monospace,
+                fontSize = 96.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace,
                 color = if (status == RunState.PLAYING) C_ACCENT else C_TEXT
             )
             Spacer(Modifier.width(8.dp))
-            Text("BPM", color = C_ACCENT, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 22.dp))
+            Text("BPM", color = C_ACCENT, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 16.dp))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
             StepperBtn("−") { bpm = (bpm - 1f).coerceIn(110f, 230f) }
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(12.dp))
             StepperBtn("＋") { bpm = (bpm + 1f).coerceIn(110f, 230f) }
         }
 
-        Spacer(Modifier.height(16.dp))
-        SliderCard(title = "步频范围", value = "${bpm.toInt()}", unit = "BPM") {
-            Slider(value = bpm, onValueChange = { bpm = it }, valueRange = 110f..230f, steps = 119)
+        Spacer(Modifier.height(10.dp))
+        SliderCard(title = "步频范围", value = "${bpm.toInt()}", unit = "BPM", iconRes = R.drawable.ic_cadence) {
+            Slider(value = bpm, onValueChange = { bpm = it }, valueRange = 110f..230f, steps = 119, modifier = Modifier.height(36.dp))
         }
-        SliderCard(title = "训练倒计时", value = if (timeoutMin > 0) "$timeoutMin" else "不限", unit = if (timeoutMin > 0) "min" else "") {
-            Slider(value = timeoutMin.toFloat(), onValueChange = { timeoutMin = it.toInt() }, valueRange = 0f..300f, steps = 300)
+        SliderCard(title = "训练倒计时", value = if (timeoutMin > 0) "$timeoutMin" else "不限", unit = if (timeoutMin > 0) "min" else "", iconRes = R.drawable.ic_timer) {
+            Slider(value = timeoutMin.toFloat(), onValueChange = { timeoutMin = it.toInt() }, valueRange = 0f..300f, steps = 300, modifier = Modifier.height(36.dp))
         }
 
-        // 音色卡（横向滑动，无描述小字）
-        Spacer(Modifier.height(16.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        // 音色卡
+        Spacer(Modifier.height(10.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             items(Tone.entries) { t ->
                 ToneCard(t, selected = tone == t, onClick = {
                     tone = t
@@ -199,9 +183,9 @@ fun AppScreen() {
             }
         }
 
-        Spacer(Modifier.height(24.dp))
-        // 主按钮 + 停止，同一行
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Spacer(Modifier.height(16.dp))
+        // 主按钮 + 停止 同一行
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(
                 onClick = {
                     when (status) {
@@ -210,31 +194,36 @@ fun AppScreen() {
                         RunState.PAUSED -> { sendAction(context, MetronomeService.ACTION_RESUME); status = RunState.PLAYING }
                     }
                 },
-                modifier = Modifier.weight(1f).height(64.dp),
-                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.weight(1f).height(56.dp),
+                shape = RoundedCornerShape(18.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (status == RunState.PLAYING) C_SURFACE2 else C_ACCENT,
                     contentColor = if (status == RunState.PLAYING) C_TEXT else C_ON_ACCENT
                 )
             ) {
-                Text(if (status == RunState.PLAYING) "暂停" else "开始", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+                Icon(painterResource(if (status == RunState.PLAYING) R.drawable.ic_pause else R.drawable.ic_play), null, Modifier.size(18.dp), tint = if (status == RunState.PLAYING) C_TEXT else C_ON_ACCENT)
+                Spacer(Modifier.width(8.dp))
+                Text(if (status == RunState.PLAYING) "暂停" else "开始", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
             }
             OutlinedButton(
                 onClick = {
                     if (status != RunState.IDLE) sendAction(context, MetronomeService.ACTION_STOP)
                     status = RunState.IDLE
                 },
-                modifier = Modifier.width(96.dp).height(64.dp),
-                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.width(92.dp).height(56.dp),
+                shape = RoundedCornerShape(18.dp),
                 border = BorderStroke(1.dp, C_LINE),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = C_WARN)
             ) {
-                Text("停止", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(painterResource(R.drawable.ic_stop), null, Modifier.size(16.dp), tint = C_WARN)
+                    Spacer(Modifier.height(2.dp))
+                    Text("停止", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
 
-    // 音量弹窗（右上角音量键唤起）
     if (showVolume) {
         AlertDialog(
             onDismissRequest = { showVolume = false },
@@ -260,33 +249,31 @@ fun AppScreen() {
 
 @Composable
 private fun StepperBtn(label: String, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
-        color = C_SURFACE,
-        border = BorderStroke(1.dp, C_LINE),
-        modifier = Modifier.size(56.dp)
-    ) {
+    Surface(onClick = onClick, shape = RoundedCornerShape(14.dp), color = C_SURFACE, border = BorderStroke(1.dp, C_LINE), modifier = Modifier.size(48.dp)) {
         Box(contentAlignment = Alignment.Center) {
-            Text(label, color = C_TEXT, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+            Text(label, color = C_TEXT, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
 
 @Composable
-private fun SliderCard(title: String, value: String, unit: String, slider: @Composable () -> Unit) {
+private fun SliderCard(title: String, value: String, unit: String, iconRes: Int, slider: @Composable () -> Unit) {
     Card(
-        Modifier.fillMaxWidth().padding(top = 14.dp),
-        shape = RoundedCornerShape(20.dp),
+        Modifier.fillMaxWidth().padding(top = 12.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = C_SURFACE),
         border = BorderStroke(1.dp, C_LINE)
     ) {
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(title, color = C_TEXT2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                Text(if (unit.isEmpty()) value else "$value $unit", color = C_TEXT, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(painterResource(iconRes), null, Modifier.size(16.dp), tint = C_TEXT2)
+                    Spacer(Modifier.width(6.dp))
+                    Text(title, color = C_TEXT2, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Text(if (unit.isEmpty()) value else "$value $unit", color = C_TEXT, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(2.dp))
             slider()
         }
     }
@@ -295,22 +282,23 @@ private fun SliderCard(title: String, value: String, unit: String, slider: @Comp
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ToneCard(t: Tone, selected: Boolean, onClick: () -> Unit) {
+    val iconRes = when (t) {
+        Tone.FOOTSTEP -> R.drawable.ic_tone_foot
+        else -> R.drawable.ic_tone_bubble
+    }
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(16.dp),
         color = if (selected) C_TONE_ON else C_SURFACE,
         border = BorderStroke(1.5.dp, if (selected) C_ACCENT else C_LINE),
-        modifier = Modifier.width(96.dp)
+        modifier = Modifier.width(88.dp)
     ) {
-        Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                Modifier.size(48.dp).background(if (selected) C_ACCENT else C_SURFACE2, RoundedCornerShape(14.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(t.display.first().toString(), color = if (selected) C_ON_ACCENT else C_TEXT, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.size(40.dp).background(if (selected) C_ACCENT else C_SURFACE2, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                Icon(painterResource(iconRes), null, Modifier.size(22.dp), tint = if (selected) C_ON_ACCENT else C_TEXT)
             }
-            Spacer(Modifier.height(8.dp))
-            Text(t.display, color = C_TEXT, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(6.dp))
+            Text(t.display, color = C_TEXT, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
         }
     }
 }
