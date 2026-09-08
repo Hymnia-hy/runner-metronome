@@ -7,30 +7,37 @@ import android.media.AudioTrack
 import android.media.SoundPool
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.util.Log
 
 /**
  * 音频播放层。
- * - 节拍：MODE_STATIC 长 PCM 无缝循环，节拍点已在采样层面固定，零调度抖动。
- * - 试听/报时/到点提示：SoundPool 短音，避免每次新建 AudioTrack 的开销。
- * - 所有音色先做峰值归一化再统一增益，响度一致且不削波。
- * - USAGE_MEDIA 且不请求音频焦点 → 与 QQ音乐 / 喜马拉雅 共存，互不打断。
+ *
+ * 节拍用 MODE_STREAM + 常驻写入线程把 PCM 首尾相接连续喂给音轨：
+ * - MODE_STATIC 需要一次性分配整段 PCM 的共享缓冲，Android 上存在约 1MB 的实现上限
+ *   （部分设备更低），10 秒循环即 960KB，实测在该限制边缘会创建失败；
+ * - 流式写入没有这个限制（缓冲只需几十 KB），且数据首尾相接即天然无缝循环。
+ *
+ * 试听 / 报时 / 到点提示走 SoundPool，与节拍同一媒体通道，响度观感一致。
+ * 所有音色先做峰值归一化再统一增益，响度一致且不削波。
+ * USAGE_MEDIA 且不请求音频焦点 → 与 QQ音乐 / 喜马拉雅 共存，互不打断。
  */
 class MetronomePlayer(private val context: Context) {
 
     private var track: AudioTrack? = null
+
+    @Volatile
+    private var streaming = false
+    private var writer: Thread? = null
+
     private var soundPool: SoundPool? = null
     private val beepIds = mutableMapOf<Tone, Int>()
     private val handler = Handler(Looper.getMainLooper())
 
-    // —— 节拍音轨 ——
+    // —— 节拍 ——
 
-    /**
-     * 构建可循环播放的音轨。**必须在后台线程调用**
-     * （解码 + 烘焙 + 写入 MB 级 PCM，主线程执行会掉帧）。
-     * 失败返回 null：设备不支持该采样率、缓冲分配失败等，由调用方提示用户。
-     */
-    fun buildTrack(bpm: Int, tone: Tone, volume: Float): AudioTrack? {
+    /** 后台线程构建循环 PCM（解码 + 逐采样烘焙），失败返回 null。 */
+    fun buildPcm(bpm: Int, tone: Tone): ShortArray? {
         val raw = runCatching { BeatPcmBuilder.loadRawPcm(context, tone.resId) }.getOrNull()
         if (raw == null || raw.isEmpty()) {
             Log.e(TAG, "音色资源为空: $tone")
@@ -40,7 +47,15 @@ class MetronomePlayer(private val context: Context) {
             BeatPcmBuilder.build(bpm.toDouble(), normalize(raw, NORM_PEAK)),
             MASTER_GAIN_RATIO,
         )
-        if (pcm.isEmpty()) return null
+        return if (pcm.isEmpty()) null else pcm
+    }
+
+    /**
+     * 主线程：开始流式循环播放，返回错误描述（null 表示成功）。
+     * 调用方把错误直接展示给用户，避免"点了没反应也说不清原因"。
+     */
+    fun play(pcm: ShortArray, volume: Float): String? {
+        stopTrack()
 
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -53,44 +68,57 @@ class MetronomePlayer(private val context: Context) {
             .build()
         val minBuf = AudioTrack.getMinBufferSize(
             BeatPcmBuilder.SR, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
-        )
+        ).let { if (it > 0) it else BeatPcmBuilder.SR }
+        val bufferBytes = maxOf(minBuf * 4, MIN_BUFFER_BYTES)
+
         val t = try {
             AudioTrack.Builder()
                 .setAudioAttributes(attrs)
                 .setAudioFormat(fmt)
-                .setBufferSizeInBytes(maxOf(minBuf, pcm.size * 2))
-                .setTransferMode(AudioTrack.MODE_STATIC)
+                .setBufferSizeInBytes(bufferBytes)
+                .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
         } catch (e: Exception) {
             Log.e(TAG, "AudioTrack 创建失败", e)
-            return null
+            return "创建音轨失败：${e.message ?: e.javaClass.simpleName}"
         }
         if (t.state != AudioTrack.STATE_INITIALIZED) {
-            Log.e(TAG, "AudioTrack 未初始化，state=${t.state}")
+            Log.e(TAG, "AudioTrack 未初始化 state=${t.state}")
             runCatching { t.release() }
-            return null
+            return "音轨未初始化（state=${t.state}）"
         }
-        val written = t.write(pcm, 0, pcm.size)
-        if (written <= 0) {
-            Log.e(TAG, "AudioTrack.write 失败: $written")
-            runCatching { t.release() }
-            return null
-        }
-        t.setVolume(volume.coerceIn(0f, 1f))
-        t.setLoopPoints(0, pcm.size, -1)
-        return t
+        runCatching { t.setVolume(volume.coerceIn(0f, 1f)) }
+        runCatching { t.play() }
+        track = t
+        startWriter(t, pcm)
+        return null
     }
 
-    /** 主线程：切换到新音轨并开始播放（旧音轨先停后释，避免两轨重叠出现"双响"）。 */
-    fun play(newTrack: AudioTrack, volume: Float) {
-        val old = track
-        track = newTrack
-        runCatching {
-            old?.stop()
-            old?.release()
+    /** 常驻写入线程：循环喂 PCM。write 在缓冲满时阻塞，暂停时自然挂起。 */
+    private fun startWriter(t: AudioTrack, pcm: ShortArray) {
+        streaming = true
+        writer = Thread({
+            runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO) }
+            var offset = 0
+            while (streaming) {
+                val count = minOf(WRITE_CHUNK_FRAMES, pcm.size - offset)
+                val written = try {
+                    t.write(pcm, offset, count)
+                } catch (e: Exception) {
+                    -1
+                }
+                if (written < 0) break
+                if (written == 0) {
+                    runCatching { Thread.sleep(5) }
+                    continue
+                }
+                offset += written
+                if (offset >= pcm.size) offset = 0
+            }
+        }, "metronome-writer").apply {
+            priority = Thread.MAX_PRIORITY
+            start()
         }
-        newTrack.setVolume(volume.coerceIn(0f, 1f))
-        runCatching { newTrack.play() }
     }
 
     fun setVolume(v: Float) {
@@ -105,14 +133,18 @@ class MetronomePlayer(private val context: Context) {
         runCatching { track?.play() }
     }
 
-    /** 停止并释放当前节拍音轨（SoundPool 保持可用，便于紧接着播提示音）。 */
+    /** 停止并释放节拍音轨（SoundPool 保持可用，便于紧接着播提示音）。 */
     fun stopTrack() {
+        streaming = false
         val t = track
         track = null
-        runCatching {
-            t?.stop()
-            t?.release()
-        }
+        // stop() 会唤醒阻塞中的 write()，让写入线程尽快退出
+        runCatching { t?.pause() }
+        runCatching { t?.stop() }
+        writer?.let { runCatching { it.join(500) } }
+        writer = null
+        runCatching { t?.flush() }
+        runCatching { t?.release() }
     }
 
     /** 释放全部资源（含 SoundPool），并取消未执行的提示音。 */
@@ -190,5 +222,11 @@ class MetronomePlayer(private val context: Context) {
         private const val TAG = "MetronomePlayer"
         private const val MASTER_GAIN_RATIO = 2.0f
         private const val NORM_PEAK = 13000
+
+        /** 单次写入帧数（≈85ms @48kHz）。 */
+        private const val WRITE_CHUNK_FRAMES = 4096
+
+        /** 流式缓冲下限，约 341ms，足以吸收线程调度抖动避免 underrun。 */
+        private const val MIN_BUFFER_BYTES = 32 * 1024
     }
 }

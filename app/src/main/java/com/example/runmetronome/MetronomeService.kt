@@ -125,7 +125,7 @@ class MetronomeService : Service() {
     }
 
     /**
-     * 后台重建 PCM 音轨并热切换。
+     * 后台构建 PCM，回到主线程起音轨并热切换。
      * 构建 10 秒级 PCM 需要解码 + 逐采样烘焙，放在主线程会造成明显掉帧。
      */
     private fun rebuildTrack(restartTimer: Boolean) {
@@ -134,18 +134,20 @@ class MetronomeService : Service() {
         val reqTone = tone
         val reqVolume = volume
         buildExecutor.execute {
-            val track = runCatching { player.buildTrack(reqBpm, reqTone, reqVolume) }.getOrNull()
+            val pcm = runCatching { player.buildPcm(reqBpm, reqTone) }.getOrNull()
             mainHandler.post {
-                if (gen != buildGeneration) {
-                    runCatching { track?.release() }
-                    return@post
-                }
-                if (track == null) {
-                    PlaybackStore.update { it.copy(error = "音频初始化失败，请重试或换一个音色") }
+                if (gen != buildGeneration) return@post
+                if (pcm == null) {
+                    PlaybackStore.update { it.copy(error = "音频数据构建失败，请重试或换一个音色") }
                     stopTraining(notifyDone = false)
                     return@post
                 }
-                player.play(track, reqVolume)
+                val failure = player.play(pcm, reqVolume)
+                if (failure != null) {
+                    PlaybackStore.update { it.copy(error = failure) }
+                    stopTraining(notifyDone = false)
+                    return@post
+                }
                 if (paused) player.pause() else if (restartTimer) startTicker()
                 PlaybackStore.update {
                     it.copy(
