@@ -1,3 +1,9 @@
 <resources>
-    <style name="Theme.RunMetronome" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- 深色主题：与设计规范的深海军蓝底一致（旧版用 Light 主题会白闪、状态栏观感不搭） -->
+    <style name="Theme.RunMetronome" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@color/window_background</item>
+        <item name="android:navigationBarColor">@color/window_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
 </resources>

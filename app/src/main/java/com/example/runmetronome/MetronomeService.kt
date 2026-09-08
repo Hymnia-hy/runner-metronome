@@ -7,160 +7,376 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import java.util.concurrent.Executors
 
 /**
  * 前台服务：保证锁屏 / 切后台时节拍不断。
- * 节拍以"长 PCM 无缝循环"方式播放（见 MetronomePlayer），无逐拍调度抖动、间隔绝对一致。
- * 支持：实时音量、暂停/继续、5 小时倒计时、每 15 分钟报时。
+ *
+ * 职责：
+ * - 节拍以"长 PCM 无缝循环"方式播放（见 [MetronomePlayer]），无逐拍调度抖动；
+ * - 运行期支持实时改步频 / 音色 / 音量 / 倒计时（ACTION_UPDATE）；
+ * - 倒计时暂停时同步停走，每 15 分钟报时，到点提示并发出可清除的结束通知；
+ * - 状态通过 [PlaybackStore] 回传 UI，避免界面与实际播放脱节。
  */
 class MetronomeService : Service() {
 
     companion object {
-        private const val CHANNEL_ID = "run_metronome"
-        private const val NOTIF_ID = 1
-        private const val ANNOUNCE_INTERVAL_MS = 15 * 60 * 1000L
+        private const val CHANNEL_ONGOING = "run_metronome"
+        private const val CHANNEL_ALERT = "run_metronome_alert"
+        private const val NOTIF_ONGOING = 1
+        private const val NOTIF_DONE = 2
+        private const val ANNOUNCE_INTERVAL_SEC = 15 * 60
+
         const val ACTION_START = "com.example.runmetronome.START"
         const val ACTION_STOP = "com.example.runmetronome.STOP"
         const val ACTION_PAUSE = "com.example.runmetronome.PAUSE"
         const val ACTION_RESUME = "com.example.runmetronome.RESUME"
-        const val ACTION_VOLUME = "com.example.runmetronome.VOLUME"
+        const val ACTION_UPDATE = "com.example.runmetronome.UPDATE"
         const val EXTRA_BPM = "bpm"
         const val EXTRA_TONE = "tone"
         const val EXTRA_VOLUME = "volume"
         const val EXTRA_TIMEOUT_MIN = "timeout_min"
+
+        /** 服务是否处于运行态；UI 据此决定用 startService 还是 startForegroundService。 */
+        fun isRunning(): Boolean = PlaybackStore.state.running
     }
 
     private lateinit var player: MetronomePlayer
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val buildExecutor = Executors.newSingleThreadExecutor()
+
     private var wakeLock: PowerManager.WakeLock? = null
-    private var timeoutRunnable: Runnable? = null
-    private var announceRunnable: Runnable? = null
-    private var tone: Tone = Tone.BUBBLE1
+    private var foregroundStarted = false
+
+    /** 每次重建 PCM 自增，用于作废在途的旧构建结果，避免快速调参时竞态。 */
+    private var buildGeneration = 0
+
+    private var running = false
+    private var paused = false
+    private var bpm = DEFAULT_BPM
+    private var tone = Tone.BUBBLE1
+    private var volume = 1f
     private var timeoutMin = 0
+    private var elapsedSec = 0
+
+    private val ticker = object : Runnable {
+        override fun run() {
+            if (!running || paused) return
+            elapsedSec++
+            val remaining = if (timeoutMin > 0) timeoutMin * 60 - elapsedSec else -1
+            if (timeoutMin > 0 && remaining <= 0) {
+                finishTraining()
+                return
+            }
+            if (timeoutMin > 0 && remaining > 0 && remaining % ANNOUNCE_INTERVAL_SEC == 0) {
+                player.beep(Tone.BUBBLE3, volume, repeats = 2)
+            }
+            if (elapsedSec % 60 == 0) updateOngoingNotification()
+            PlaybackStore.update { it.copy(elapsedSec = elapsedSec, remainingSec = remaining) }
+            mainHandler.postDelayed(this, 1000)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         player = MetronomePlayer(this)
+        ensureChannels()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_STOP -> {
-                stopEverything()
-                stopSelf()
-                return START_NOT_STICKY
-            }
-            ACTION_START -> startMetronome(intent)
-            ACTION_PAUSE -> player.pause()
-            ACTION_RESUME -> player.resume()
-            ACTION_VOLUME -> player.setVolume(intent.getFloatExtra(EXTRA_VOLUME, 1f))
-            else -> {}
+            ACTION_START -> startTraining(intent)
+            ACTION_STOP -> if (alive()) stopTraining(notifyDone = false) else stopSelf()
+            ACTION_PAUSE -> if (alive()) pauseTraining() else stopSelf()
+            ACTION_RESUME -> if (alive()) resumeTraining() else stopSelf()
+            ACTION_UPDATE -> if (alive()) applyUpdate(intent) else stopSelf()
+            else -> if (!alive()) stopSelf()
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
-    private fun startMetronome(intent: Intent) {
-        val bpm = intent.getDoubleExtra(EXTRA_BPM, 180.0)
-        val volume = intent.getFloatExtra(EXTRA_VOLUME, 1f)
-        timeoutMin = intent.getIntExtra(EXTRA_TIMEOUT_MIN, 0).coerceIn(0, 300)
-        val toneName = intent.getStringExtra(EXTRA_TONE) ?: Tone.BUBBLE1.name
+    /**
+     * 是否处于可执行命令的运行态。
+     * 非 START 命令若服务其实没在运行，必须立刻停掉自己：一旦被
+     * startForegroundService() 拉起却不在 5 秒内调用 startForeground()，
+     * Android 8+ 会抛 ForegroundServiceDidNotStartInTimeException 直接崩溃。
+     */
+    private fun alive(): Boolean = running && foregroundStarted
 
-        startForeground(NOTIF_ID, buildNotification("节拍进行中 · ${bpm.toInt()} BPM"))
+    // —— 训练生命周期 ——
 
-        tone = runCatching { Tone.valueOf(toneName) }.getOrDefault(Tone.BUBBLE1)
-        player.prepare(bpm, tone, volume)
+    private fun startTraining(intent: Intent) {
+        bpm = intent.getIntExtra(EXTRA_BPM, DEFAULT_BPM).coerceIn(BPM_MIN, BPM_MAX)
+        tone = parseTone(intent.getStringExtra(EXTRA_TONE), Tone.BUBBLE1)
+        volume = intent.getFloatExtra(EXTRA_VOLUME, 1f).coerceIn(0f, 1f)
+        timeoutMin = intent.getIntExtra(EXTRA_TIMEOUT_MIN, 0).coerceIn(0, TIMEOUT_MAX)
+        elapsedSec = 0
+        paused = false
+        running = true
+
+        startForeground(NOTIF_ONGOING, buildOngoingNotification())
+        foregroundStarted = true
         acquireWakeLock()
+        rebuildTrack(restartTimer = true)
+    }
 
-        timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-        announceRunnable?.let { mainHandler.removeCallbacks(it) }
-
-        if (timeoutMin > 0) {
-            val r = Runnable {
-                stopEverything()
-                notifyFinished()
-                stopSelf()
+    /**
+     * 后台重建 PCM 音轨并热切换。
+     * 构建 10 秒级 PCM 需要解码 + 逐采样烘焙，放在主线程会造成明显掉帧。
+     */
+    private fun rebuildTrack(restartTimer: Boolean) {
+        val gen = ++buildGeneration
+        val reqBpm = bpm
+        val reqTone = tone
+        val reqVolume = volume
+        buildExecutor.execute {
+            val track = runCatching { player.buildTrack(reqBpm, reqTone, reqVolume) }.getOrNull()
+            mainHandler.post {
+                if (gen != buildGeneration) {
+                    runCatching { track?.release() }
+                    return@post
+                }
+                if (track == null) {
+                    PlaybackStore.update { it.copy(error = "音频初始化失败，请重试或换一个音色") }
+                    stopTraining(notifyDone = false)
+                    return@post
+                }
+                player.play(track, reqVolume)
+                if (paused) player.pause() else if (restartTimer) startTicker()
+                PlaybackStore.update {
+                    it.copy(
+                        running = true,
+                        paused = paused,
+                        bpm = reqBpm,
+                        tone = reqTone,
+                        timeoutMin = timeoutMin,
+                        elapsedSec = elapsedSec,
+                        remainingSec = remainingSec(),
+                        error = null,
+                    )
+                }
+                updateOngoingNotification()
             }
-            timeoutRunnable = r
-            mainHandler.postDelayed(r, timeoutMin * 60_000L)
-            scheduleAnnouncements()
         }
     }
 
-    /** 每 15 分钟报时一次，直到倒计时结束。 */
-    private fun scheduleAnnouncements() {
-        val r = object : Runnable {
-            var minute = 15
-            override fun run() {
-                if (minute > timeoutMin) return
-                Thread {
-                    runCatching { MetronomePlayer(this@MetronomeService).playBeep(Tone.BUBBLE1, 1f) }
-                }.start()
-                getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification("已进行 $minute 分钟"))
-                minute += 15
-                mainHandler.postDelayed(this, ANNOUNCE_INTERVAL_MS)
-            }
-        }
-        announceRunnable = r
-        mainHandler.postDelayed(r, ANNOUNCE_INTERVAL_MS)
-    }
-
-    private fun stopEverything() {
-        player.release()
-        timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-        announceRunnable?.let { mainHandler.removeCallbacks(it) }
-        timeoutRunnable = null
-        announceRunnable = null
+    private fun pauseTraining() {
+        if (paused) return
+        paused = true
+        player.pause()
+        mainHandler.removeCallbacks(ticker)
         releaseWakeLock()
+        PlaybackStore.update { it.copy(paused = true) }
+        updateOngoingNotification()
     }
+
+    private fun resumeTraining() {
+        if (!paused) return
+        paused = false
+        player.resume()
+        acquireWakeLock()
+        startTicker()
+        PlaybackStore.update { it.copy(paused = false) }
+        updateOngoingNotification()
+    }
+
+    /**
+     * 运行中热更新参数。只处理真正带上的字段：
+     * 音量即时生效（只改音轨增益），步频/音色才重建音轨，倒计时按已跑时长重算剩余。
+     */
+    private fun applyUpdate(intent: Intent) {
+        var needRebuild = false
+
+        if (intent.hasExtra(EXTRA_BPM)) {
+            val newBpm = intent.getIntExtra(EXTRA_BPM, bpm).coerceIn(BPM_MIN, BPM_MAX)
+            if (newBpm != bpm) {
+                bpm = newBpm
+                needRebuild = true
+            }
+        }
+        if (intent.hasExtra(EXTRA_TONE)) {
+            val newTone = parseTone(intent.getStringExtra(EXTRA_TONE), tone)
+            if (newTone != tone) {
+                tone = newTone
+                needRebuild = true
+            }
+        }
+        if (intent.hasExtra(EXTRA_VOLUME)) {
+            val newVolume = intent.getFloatExtra(EXTRA_VOLUME, volume).coerceIn(0f, 1f)
+            if (newVolume != volume) {
+                volume = newVolume
+                player.setVolume(volume)
+            }
+        }
+        if (intent.hasExtra(EXTRA_TIMEOUT_MIN)) {
+            val newTimeout = intent.getIntExtra(EXTRA_TIMEOUT_MIN, timeoutMin).coerceIn(0, TIMEOUT_MAX)
+            if (newTimeout != timeoutMin) {
+                timeoutMin = newTimeout
+                PlaybackStore.update { it.copy(timeoutMin = timeoutMin, remainingSec = remainingSec()) }
+            }
+        }
+
+        if (needRebuild) rebuildTrack(restartTimer = false) else updateOngoingNotification()
+    }
+
+    private fun stopTraining(notifyDone: Boolean) {
+        running = false
+        paused = false
+        buildGeneration++
+        mainHandler.removeCallbacks(ticker)
+        player.stopTrack()
+        releaseWakeLock()
+        elapsedSec = 0
+        PlaybackStore.update {
+            it.copy(running = false, paused = false, elapsedSec = 0, remainingSec = -1)
+        }
+        if (notifyDone) notifyFinished()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        foregroundStarted = false
+        stopSelf()
+    }
+
+    /** 倒计时到点：先提示音（走 SoundPool，不受音轨释放影响），再收尾并发出结束通知。 */
+    private fun finishTraining() {
+        mainHandler.removeCallbacks(ticker)
+        player.stopTrack()
+        player.beep(Tone.BUBBLE1, volume, repeats = 3)
+        running = false
+        paused = false
+        buildGeneration++
+        releaseWakeLock()
+        elapsedSec = 0
+        PlaybackStore.update {
+            it.copy(running = false, paused = false, elapsedSec = 0, remainingSec = -1)
+        }
+        notifyFinished()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        foregroundStarted = false
+        stopSelf()
+    }
+
+    private fun startTicker() {
+        mainHandler.removeCallbacks(ticker)
+        mainHandler.postDelayed(ticker, 1000)
+    }
+
+    private fun remainingSec(): Int =
+        if (timeoutMin > 0) (timeoutMin * 60 - elapsedSec).coerceAtLeast(0) else -1
+
+    private fun parseTone(name: String?, fallback: Tone): Tone =
+        if (name == null) fallback else runCatching { Tone.valueOf(name) }.getOrDefault(fallback)
+
+    // —— 唤醒锁 ——
 
     private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RunMetronome::beat").apply {
             setReferenceCounted(false)
-            acquire(5 * 60 * 60 * 1000L)
+            runCatching { acquire(6 * 60 * 60 * 1000L) }
         }
     }
 
     private fun releaseWakeLock() {
-        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock?.let { if (it.isHeld) runCatching { it.release() } }
         wakeLock = null
     }
 
-    private fun notifyFinished() {
-        Thread {
-            runCatching { MetronomePlayer(this@MetronomeService).playBeep(Tone.BUBBLE1, 1f) }
-        }.start()
-        getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification("训练结束"))
+    // —— 通知 ——
+
+    private fun ensureChannels() {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_ONGOING, "节拍器运行状态", NotificationManager.IMPORTANCE_LOW).apply {
+                setShowBadge(false)
+                description = "锁屏 / 后台播放时的常驻通知"
+            }
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_ALERT, "训练提醒", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "倒计时结束等提醒"
+            }
+        )
     }
 
-    private fun buildNotification(text: String): Notification {
-        val nm = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= 26) {
-            val channel = NotificationChannel(CHANNEL_ID, "节拍器", NotificationManager.IMPORTANCE_LOW)
-            channel.setShowBadge(false)
-            nm.createNotificationChannel(channel)
+    private fun buildOngoingNotification(): Notification {
+        val prefix = if (paused) "已暂停" else "节拍进行中"
+        val text = if (timeoutMin > 0) {
+            "$prefix · $bpm BPM · 剩余 ${formatClock(remainingSec())}"
+        } else {
+            "$prefix · $bpm BPM"
         }
-        val pi = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        return Notification.Builder(this, CHANNEL_ID)
+        return Notification.Builder(this, CHANNEL_ONGOING)
             .setContentTitle("Runner Metronome")
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentIntent(pi)
+            .setSmallIcon(R.drawable.ic_play)
+            .setContentIntent(activityPendingIntent())
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .addAction(
+                notifAction(
+                    if (paused) "继续" else "暂停",
+                    if (paused) ACTION_RESUME else ACTION_PAUSE,
+                    1
+                )
+            )
+            .addAction(notifAction("停止", ACTION_STOP, 2))
             .build()
     }
 
+    private fun notifAction(title: String, action: String, requestCode: Int): Notification.Action =
+        Notification.Action.Builder(
+            null as android.graphics.drawable.Icon?,
+            title,
+            servicePendingIntent(action, requestCode)
+        ).build()
+
+    private fun updateOngoingNotification() {
+        if (!foregroundStarted) return
+        runCatching {
+            getSystemService(NotificationManager::class.java).notify(NOTIF_ONGOING, buildOngoingNotification())
+        }
+    }
+
+    /** 训练结束通知：独立渠道 + 可划除，避免和常驻通知同 ID 被一起移除而看不到。 */
+    private fun notifyFinished() {
+        val n = Notification.Builder(this, CHANNEL_ALERT)
+            .setContentTitle("训练结束")
+            .setContentText("倒计时已完成，节拍已停止")
+            .setSmallIcon(R.drawable.ic_stop)
+            .setContentIntent(activityPendingIntent())
+            .setAutoCancel(true)
+            .build()
+        runCatching { getSystemService(NotificationManager::class.java).notify(NOTIF_DONE, n) }
+    }
+
+    private fun activityPendingIntent(): PendingIntent = PendingIntent.getActivity(
+        this,
+        0,
+        Intent(this, MainActivity::class.java),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    private fun servicePendingIntent(action: String, requestCode: Int): PendingIntent =
+        PendingIntent.getService(
+            this,
+            requestCode,
+            Intent(this, MetronomeService::class.java).setAction(action),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
     override fun onDestroy() {
-        stopEverything()
+        mainHandler.removeCallbacksAndMessages(null)
+        player.stopTrack()
+        releaseWakeLock()
+        buildExecutor.shutdownNow()
+        // 延迟释放 SoundPool，让到点提示音能完整播完
+        mainHandler.postDelayed({ player.release() }, 5000)
         super.onDestroy()
     }
 

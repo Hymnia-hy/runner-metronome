@@ -1,7 +1,15 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// 签名口令优先从 local.properties（已 gitignore）读取，避免硬编码进版本库
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
@@ -12,21 +20,22 @@ android {
         applicationId = "com.example.runmetronome"
         minSdk = 26
         targetSdk = 34
-        versionCode = 12
-        versionName = "1.11"
+        versionCode = 13
+        versionName = "1.12"
     }
 
     signingConfigs {
         create("release") {
             storeFile = file("release.keystore")
-            storePassword = "REDACTED"
-            keyAlias = "REDACTED"
-            keyPassword = "REDACTED"
+            storePassword = localProps.getProperty("RELEASE_STORE_PASSWORD") ?: "REDACTED"
+            keyAlias = localProps.getProperty("RELEASE_KEY_ALIAS") ?: "REDACTED"
+            keyPassword = localProps.getProperty("RELEASE_KEY_PASSWORD") ?: "REDACTED"
         }
     }
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
