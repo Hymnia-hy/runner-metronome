@@ -15,6 +15,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -56,10 +57,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -103,7 +110,7 @@ private const val STEP_LONG_PRESS_MS = 380L
 private const val STEP_REPEAT_MS = 70L
 
 /** 运行态停止键的长按确认时长（防误触）。 */
-private const val STOP_HOLD_MS = 600L
+private const val STOP_HOLD_MS = 400L
 
 /** 连续调参合并窗口：把滑块/步进器的密集变更合并成一次下发。 */
 private const val UPDATE_DEBOUNCE_MS = 250L
@@ -523,39 +530,67 @@ private fun StepperBtn(
     }
 }
 
-/** 停止键：运行态需长按 600ms 才生效，避免跑步中误触。 */
+/**
+ * 停止键：长按 0.4s 停止（防误触）。
+ *
+ * 提示必须**常驻**在按钮上：按下之后的任何提示都会被指尖盖住（96×64dp 的按钮
+ * 基本会被指腹完全覆盖），所以"要长按"这件事得在按下之前就看到。
+ * 长按到位时再补一次触觉反馈，不依赖眼睛确认。
+ */
 @Composable
 private fun StopButton(enabled: Boolean, onStop: () -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    var fired by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
+    var holdFraction by remember { mutableFloatStateOf(0f) }
 
-    LaunchedEffect(pressed) {
-        if (!pressed) {
-            fired = false
+    LaunchedEffect(pressed, enabled) {
+        if (!pressed || !enabled) {
+            holdFraction = 0f
             return@LaunchedEffect
         }
-        delay(STOP_HOLD_MS)
-        fired = true
-        onStop()
+        val start = withFrameNanos { it }
+        while (true) {
+            val reached = withFrameNanos { now ->
+                holdFraction = ((now - start) / 1_000_000f / STOP_HOLD_MS).coerceIn(0f, 1f)
+                holdFraction >= 1f
+            }
+            if (reached) {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                onStop()
+                break
+            }
+        }
     }
 
     OutlinedButton(
         onClick = { /* 由长按触发，避免误触 */ },
         enabled = enabled,
         interactionSource = interactionSource,
-        modifier = Modifier.width(96.dp).height(64.dp),
+        modifier = Modifier
+            .width(104.dp)
+            .height(64.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .drawWithContent {
+                drawContent()
+                // 长按进度：从底部向上填充（手指可能盖住文字，边缘仍可见）
+                if (holdFraction > 0f) {
+                    drawRect(
+                        color = C_WARN.copy(alpha = 0.3f),
+                        topLeft = Offset(0f, size.height * (1f - holdFraction)),
+                        size = Size(size.width, size.height * holdFraction),
+                    )
+                }
+            },
         shape = RoundedCornerShape(20.dp),
         border = BorderStroke(1.dp, if (pressed) C_WARN else C_LINE),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
         colors = ButtonDefaults.outlinedButtonColors(contentColor = C_WARN),
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(painterResource(R.drawable.ic_stop), null, Modifier.size(18.dp), tint = C_WARN)
+            Icon(painterResource(R.drawable.ic_stop), null, Modifier.size(16.dp), tint = C_WARN)
             Spacer(Modifier.height(2.dp))
-            Text(
-                if (pressed && enabled) "按住…" else "停止",
-                fontSize = 15.sp, fontWeight = FontWeight.Bold
-            )
+            Text("长按停止", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
         }
     }
 }
