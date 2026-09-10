@@ -1,4 +1,4 @@
-package com.example.runmetronome
+package io.github.hymnia.runmetronome
 
 import android.content.Context
 import kotlin.math.ceil

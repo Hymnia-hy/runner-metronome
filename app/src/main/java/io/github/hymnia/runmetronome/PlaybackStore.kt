@@ -1,4 +1,4 @@
-package com.example.runmetronome
+package io.github.hymnia.runmetronome
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf

@@ -1,4 +1,4 @@
-package com.example.runmetronome
+package io.github.hymnia.runmetronome
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -31,11 +31,11 @@ class MetronomeService : Service() {
         private const val NOTIF_DONE = 2
         private const val ANNOUNCE_INTERVAL_SEC = 15 * 60
 
-        const val ACTION_START = "com.example.runmetronome.START"
-        const val ACTION_STOP = "com.example.runmetronome.STOP"
-        const val ACTION_PAUSE = "com.example.runmetronome.PAUSE"
-        const val ACTION_RESUME = "com.example.runmetronome.RESUME"
-        const val ACTION_UPDATE = "com.example.runmetronome.UPDATE"
+        const val ACTION_START = "io.github.hymnia.runmetronome.START"
+        const val ACTION_STOP = "io.github.hymnia.runmetronome.STOP"
+        const val ACTION_PAUSE = "io.github.hymnia.runmetronome.PAUSE"
+        const val ACTION_RESUME = "io.github.hymnia.runmetronome.RESUME"
+        const val ACTION_UPDATE = "io.github.hymnia.runmetronome.UPDATE"
         const val EXTRA_BPM = "bpm"
         const val EXTRA_TONE = "tone"
         const val EXTRA_VOLUME = "volume"

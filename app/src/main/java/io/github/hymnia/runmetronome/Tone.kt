@@ -1,4 +1,4 @@
-package com.example.runmetronome
+package io.github.hymnia.runmetronome
 
 /**
  * 音效种类：柔和、耐听的音色，适合长时间（如马拉松 4 小时）持续听、不厌烦。

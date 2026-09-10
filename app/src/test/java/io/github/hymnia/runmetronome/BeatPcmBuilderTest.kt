@@ -1,4 +1,4 @@
-package com.example.runmetronome
+package io.github.hymnia.runmetronome
 
 import org.junit.Assert.assertTrue
 import org.junit.Test

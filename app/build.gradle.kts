@@ -15,15 +15,15 @@ fun requiredProp(key: String) = localProps.getProperty(key)
     ?: error("缺少 $key：请在本机 local.properties 中配置（该文件不会被提交）")
 
 android {
-    namespace = "com.example.runmetronome"
+    namespace = "io.github.hymnia.runmetronome"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.runmetronome"
+        applicationId = "io.github.hymnia.runmetronome"
         minSdk = 26
         targetSdk = 34
-        versionCode = 18
-        versionName = "1.17"
+        versionCode = 19
+        versionName = "1.18"
     }
 
     signingConfigs {

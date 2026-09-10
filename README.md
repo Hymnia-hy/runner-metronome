@@ -23,7 +23,7 @@ A native Android running metronome that keeps your cadence steady. Built for lon
 ## 目录结构
 ```
 metronome/
-  app/src/main/java/com/example/runmetronome/
+  app/src/main/java/io/github/hymnia/runmetronome/
     MainActivity.kt          # Compose 主界面（节拍柱脉冲 / 卡片 / 长按交互 / 引导）
     PlaybackStore.kt         # 服务 → UI 的单向状态回传（运行态 / 已跑时长 / 剩余时间）
     SettingsStore.kt         # 设置持久化 + 全局参数范围常量
