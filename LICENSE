@@ -19,13 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-## Third-party assets
-
-The bundled metronome tones (`app/src/main/res/raw/*.wav`) are derived from
-sound effects published by BigSoundBank, released into the public domain
-under CC0. The original transients were extracted and converted to 16-bit PCM.
-
-The app icon is an original work created for this project.
