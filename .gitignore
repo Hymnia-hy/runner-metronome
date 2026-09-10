@@ -3,4 +3,9 @@ build/
 app/build/
 local.properties
 *.keystore
+*.jks
 *.apk
+.kotlin/
+.idea/
+*.iml
+.DS_Store

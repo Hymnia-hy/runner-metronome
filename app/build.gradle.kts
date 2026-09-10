@@ -6,11 +6,13 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// 签名口令优先从 local.properties（已 gitignore）读取，避免硬编码进版本库
+// 签名口令必须来自 local.properties（已 gitignore），源码中不保留任何口令
 val localProps = Properties().apply {
     val f = rootProject.file("local.properties")
     if (f.exists()) f.inputStream().use { load(it) }
 }
+fun requiredProp(key: String) = localProps.getProperty(key)
+    ?: error("缺少 $key：请在本机 local.properties 中配置（该文件不会被提交）")
 
 android {
     namespace = "com.example.runmetronome"
@@ -20,16 +22,16 @@ android {
         applicationId = "com.example.runmetronome"
         minSdk = 26
         targetSdk = 34
-        versionCode = 17
-        versionName = "1.16"
+        versionCode = 18
+        versionName = "1.17"
     }
 
     signingConfigs {
         create("release") {
             storeFile = file("release.keystore")
-            storePassword = localProps.getProperty("RELEASE_STORE_PASSWORD") ?: "REDACTED"
+            storePassword = requiredProp("RELEASE_STORE_PASSWORD")
             keyAlias = localProps.getProperty("RELEASE_KEY_ALIAS") ?: "REDACTED"
-            keyPassword = localProps.getProperty("RELEASE_KEY_PASSWORD") ?: "REDACTED"
+            keyPassword = requiredProp("RELEASE_KEY_PASSWORD")
         }
     }
     buildTypes {

@@ -1,4 +1,10 @@
-# 跑者节拍器（RunMetronome）
+# Runner Metronome · 跑者节拍器
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Android-3DDC84.svg)](https://developer.android.com)
+[![minSdk](https://img.shields.io/badge/minSdk-26-blue.svg)](https://developer.android.com)
+
+A native Android running metronome that keeps your cadence steady. Built for long runs — soft, natural tones that stay pleasant over hours, and it **never interrupts your music or podcasts**.
 
 一款原生 Android 跑步节拍器 App：
 
@@ -26,7 +32,7 @@ metronome/
     Tone.kt                  # 音色枚举（对应 res/raw 内的柔和气泡 / 脚步音色）
     MetronomeService.kt      # 前台服务（锁屏后台 + 唤醒锁 + 倒计时 + 通知操作）
   app/src/test/...           # JVM 单元测试（验证节拍精度与循环正确性）
-  .toolchain/                # 本机构建工具链（JDK/Gradle/SDK）
+  LICENSE                    # MIT 许可证
 ```
 
 ## 本机（这台机器）构建
@@ -37,7 +43,16 @@ gradle assembleDebug testDebugUnitTest --no-daemon
 ```
 - 关键：本机沙箱只允许写工作目录，因此把 `HOME`/`GRADLE_USER_HOME`/`ANDROID_USER_HOME`/`TMPDIR` 都重定向到 `/home/hy/DSH/Run`（见 `env.sh`），否则 Gradle/SDK 写 `$HOME` 会被拒绝。
 - 构建产物：`app/build/outputs/apk/debug/app-debug.apk`；正式签名版 `gradle assembleRelease`，产物在 `app/build/outputs/apk/release/app-release.apk`，交付命名为 `app-<versionName>-release.apk`（如 `app-1.12-release.apk`）。
-- release 已开启 R8 + 资源压缩。签名口令默认走 `local.properties` 的 `RELEASE_STORE_PASSWORD` / `RELEASE_KEY_ALIAS` / `RELEASE_KEY_PASSWORD`，未配置时回退到内置默认值。
+- release 已开启 R8 + 资源压缩。**签名口令必须在本机 `local.properties` 中配置**（该文件已被 `.gitignore` 忽略，不会提交）：
+
+  ```properties
+  sdk.dir=/path/to/android-sdk
+  RELEASE_STORE_PASSWORD=你的口令
+  RELEASE_KEY_ALIAS=你的别名
+  RELEASE_KEY_PASSWORD=你的口令
+  ```
+
+  未配置时构建会**直接报错**——源码中不保留任何口令或默认值。
 
 ## 安装到 OPPO Find X8s
 1. 推荐安装正式签名版 `app-<versionName>-release.apk`（用 `adb install` 或传到手机安装）。
@@ -66,3 +81,9 @@ gradle assembleDebug testDebugUnitTest --no-daemon
 - 倒计时到点是否响铃并弹出结束通知
 - 运行中拖动步频滑块、切换音色、调音量、改倒计时是否即时生效
 - 步频 170/180/200 与外部标准节拍器是否吻合（180 时不应出现每 10 秒一次的空拍）
+
+## 许可证
+
+本项目采用 [MIT 许可证](LICENSE)。
+
+内置节拍音色衍生自 BigSoundBank 的 CC0 公有领域素材，原始瞬态已提取并转为 16-bit PCM；详见 [LICENSE](LICENSE)。
