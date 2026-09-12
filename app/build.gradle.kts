@@ -22,8 +22,8 @@ android {
         applicationId = "io.github.hymnia.runmetronome"
         minSdk = 26
         targetSdk = 34
-        versionCode = 19
-        versionName = "1.18"
+        versionCode = 21
+        versionName = "1.20"
     }
 
     signingConfigs {

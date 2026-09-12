@@ -11,7 +11,7 @@ A native Android running metronome that keeps your cadence steady. Built for lon
 - 柔和耐听的音色（共 3 款：气泡·柔 / 气泡·缓 / 脚步·沉），为长时间（马拉松）设计；**点音色卡片即时试听**，无需开启节拍器
 - 步频 110–230 BPM 无级调节（滑块 + ±1 步进器，步进器支持长按连续调节）
 - **运行中可实时改步频 / 音色 / 音量 / 倒计时**，不必先停止再开始
-- 播放时不打断 QQ音乐 / 喜马拉雅 等其他音频（媒体流 + 不抢音频焦点），顶栏明示「♪ 与音乐共存」
+- 播放时不打断 QQ音乐 / 喜马拉雅 等其他音频（媒体流 + 不抢音频焦点）
 - 锁屏 / 后台持续播放（前台服务 + 常驻通知 + PARTIAL_WAKE_LOCK），通知栏可直接暂停 / 继续 / 停止
 - 可选倒计时（0–300 分钟），暂停时倒计时同步停走，每 15 分钟报时，到点提示并发出可清除的结束通知
 - 设置（步频 / 音量 / 音色 / 倒计时）自动记住，冷启动沿用上次配置
@@ -24,7 +24,7 @@ A native Android running metronome that keeps your cadence steady. Built for lon
 ```
 metronome/
   app/src/main/java/io/github/hymnia/runmetronome/
-    MainActivity.kt          # Compose 主界面（节拍柱脉冲 / 卡片 / 长按交互 / 引导）
+    MainActivity.kt          # Compose 主界面（一屏布局 / 节拍柱脉冲 / 参数条 / 长按交互 / 引导）
     PlaybackStore.kt         # 服务 → UI 的单向状态回传（运行态 / 已跑时长 / 剩余时间）
     SettingsStore.kt         # 设置持久化 + 全局参数范围常量
     MetronomePlayer.kt       # 音频层（长 PCM 无缝循环 + SoundPool 短音，含错误处理）

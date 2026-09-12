@@ -9,15 +9,18 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,22 +28,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,51 +53,72 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.exp
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 
-// —— 设计规范配色（runner-metronome-design/design-guidelines.html） ——
-private val C_BG = Color(0xFF0A1426)
-private val C_SURFACE = Color(0xFF111D33)
-private val C_SURFACE2 = Color(0xFF182845)
-private val C_LINE = Color(0xFF22304D)
-private val C_ACCENT = Color(0xFF3DFF88)
-private val C_WARN = Color(0xFFFF6B35)
-private val C_TEXT = Color(0xFFF5F7FA)
-private val C_TEXT2 = Color(0xFF8A94A6)
-private val C_ON_ACCENT = Color(0xFF06281A)
-private val C_TONE_ON = Color(0xFF14352A)
+// —— 设计规范（v2 简约稿）：深炭底 + 白字 + 青柠点缀，强调色只做小面积 ——
+private val C_BG = Color(0xFF0A0C10)
+private val C_PANEL = Color(0xFF16191F)
+private val C_PANEL2 = Color(0xFF1F232C)
+private val C_LINE = Color(0xFF272C37)
+private val C_ACCENT = Color(0xFFC8FF3D)
+private val C_TEXT = Color(0xFFFFFFFF)
+private val C_TEXT2 = Color(0xFF868D9B)
+private val C_DANGER = Color(0xFFFF6B5A)
+private val C_ON_LIGHT = Color(0xFF0A0C10)
 
 private val DarkColors = darkColorScheme(
     primary = C_ACCENT,
-    onPrimary = C_ON_ACCENT,
+    onPrimary = C_ON_LIGHT,
     background = C_BG,
     onBackground = C_TEXT,
-    surface = C_SURFACE,
+    surface = C_PANEL,
     onSurface = C_TEXT,
-    surfaceVariant = C_SURFACE2,
+    surfaceVariant = C_PANEL2,
     onSurfaceVariant = C_TEXT2,
     outline = C_LINE,
-    error = C_WARN,
+    error = C_DANGER,
 )
+
+/**
+ * 字重规范（全屏统一，避免某个元素"跳"出来）：
+ * - 巨大读数（BPM 数字）：ExtraBold —— 全屏唯一的最重层级
+ * - 主操作（按钮文字）：Bold
+ * - 次级读数（参数值、面板读数、品牌、状态）：SemiBold
+ * - 其余标签、刻度、说明：Normal
+ */
+private val W_DISPLAY = FontWeight.ExtraBold
+private val W_ACTION = FontWeight.Bold
+private val W_VALUE = FontWeight.SemiBold
+private val W_LABEL = FontWeight.Normal
+
+/** 等宽数字：数值变化时水平位置不抖动。 */
+private const val TNUM = "tnum"
 
 /** 步进器长按后开始连续步进的延迟与间隔。 */
 private const val STEP_LONG_PRESS_MS = 380L
@@ -114,6 +129,9 @@ private const val STOP_HOLD_MS = 400L
 
 /** 连续调参合并窗口：把滑块/步进器的密集变更合并成一次下发。 */
 private const val UPDATE_DEBOUNCE_MS = 250L
+
+/** 参数条上可展开调节的三项。 */
+private enum class Param { VOLUME, TIMER, TONE }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -144,6 +162,8 @@ fun AppScreen() {
     var timeoutMin by remember { mutableIntStateOf(settings.timeoutMin) }
     var tone by remember { mutableStateOf(settings.tone) }
     var errorText by remember { mutableStateOf<String?>(null) }
+    var expanded by remember { mutableStateOf<Param?>(null) }
+    var showGuide by remember { mutableStateOf(!settings.guideShown) }
 
     // 试听用的短音播放器（与节拍同一媒体通道，响度观感一致）
     val preview = remember { MetronomePlayer(context) }
@@ -163,6 +183,7 @@ fun AppScreen() {
             bpm = playback.bpm
             tone = playback.tone
             timeoutMin = playback.timeoutMin
+            expanded = null
         }
     }
 
@@ -176,191 +197,103 @@ fun AppScreen() {
         pending = false
     }
 
+    // 步频的相对步进：lambda 捕获的是 State 委托，长按期间始终读到最新值
+    val stepBpm: (Int) -> Unit = { delta ->
+        bpm = (bpm + delta).coerceIn(BPM_MIN, BPM_MAX)
+    }
+    val commitBpm: () -> Unit = {
+        settings.bpm = bpm
+        pending = true
+    }
+
     Column(
         Modifier
             .fillMaxSize()
             .background(C_BG)
             .safeDrawingPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(horizontal = 20.dp)
     ) {
-        TopBar(playback)
-
-        Spacer(Modifier.height(12.dp))
-        Text(
-            "CADENCE",
-            color = C_TEXT2, fontSize = 12.sp, letterSpacing = 3.sp,
-            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()
+        TopBar(
+            playback = playback,
+            onSettings = { showGuide = true },
         )
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.Center) {
-            Text(
-                "$bpm",
-                fontSize = 108.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace,
-                color = if (playback.playing) C_ACCENT else C_TEXT,
-                maxLines = 1,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                "BPM", color = C_ACCENT, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(bottom = 18.dp)
-            )
-        }
 
-        // 节拍柱：随拍点脉冲，跑步中余光即可确认节奏在走
-        PulseBars(
-            active = playback.playing,
+        // 弹性 1：焦点带上方
+        Spacer(Modifier.weight(1f))
+
+        FocusSection(
+            playback = playback,
             bpm = bpm,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 10.dp)
-                .semantics { contentDescription = if (playback.playing) "节拍运行中" else "节拍未运行" },
         )
 
-        Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            StepperBtn(
-                label = "−",
-                contentDesc = "步频减一",
-                onTick = { bpm = (bpm - 1).coerceIn(BPM_MIN, BPM_MAX) },
-                onCommit = {
-                    settings.bpm = bpm
-                    pending = true
-                },
-            )
-            Spacer(Modifier.width(12.dp))
-            StepperBtn(
-                label = "＋",
-                contentDesc = "步频加一",
-                onTick = { bpm = (bpm + 1).coerceIn(BPM_MIN, BPM_MAX) },
-                onCommit = {
-                    settings.bpm = bpm
-                    pending = true
-                },
-            )
-        }
+        // 弹性 2：焦点带与调节行之间
+        Spacer(Modifier.weight(0.7f))
 
-        SliderCard(
-            title = "步频",
-            value = "$bpm",
-            unit = "BPM",
-            iconRes = R.drawable.ic_cadence,
-        ) {
-            DesignSlider(
-                value = bpm.toFloat(),
-                onValueChange = { bpm = it.roundToInt().coerceIn(BPM_MIN, BPM_MAX) },
-                valueRange = BPM_MIN.toFloat()..BPM_MAX.toFloat(),
-                steps = BPM_MAX - BPM_MIN - 1,
-                contentDescription = "步频 $bpm BPM",
-                onValueChangeFinished = {
-                    settings.bpm = bpm
-                    pending = true
-                },
-                modifier = Modifier.height(36.dp),
-            )
-        }
+        AdjustRow(
+            bpm = bpm,
+            onStep = stepBpm,
+            onSlide = { bpm = it },
+            onCommit = commitBpm,
+        )
 
-        val remaining = playback.remainingSec
-        SliderCard(
-            title = "训练倒计时",
-            value = when {
-                timeoutMin == 0 -> "不限"
-                playback.running && remaining >= 0 -> "剩 ${formatClock(remaining)}"
-                else -> "$timeoutMin"
-            },
-            unit = if (timeoutMin == 0 || (playback.running && remaining >= 0)) "" else "min",
-            iconRes = R.drawable.ic_timer,
-        ) {
-            DesignSlider(
-                value = timeoutMin.toFloat(),
-                onValueChange = { timeoutMin = it.roundToInt().coerceIn(0, TIMEOUT_MAX) },
-                valueRange = 0f..TIMEOUT_MAX.toFloat(),
-                steps = TIMEOUT_MAX - 1,
-                contentDescription = if (timeoutMin == 0) "倒计时不限时" else "倒计时 $timeoutMin 分钟",
-                onValueChangeFinished = {
-                    settings.timeoutMin = timeoutMin
-                    pending = true
-                },
-                modifier = Modifier.height(36.dp),
-            )
-        }
+        TickRow()
 
-        SliderCard(
-            title = "节拍音量",
-            value = "${(volume * 100).roundToInt()}",
-            unit = "%",
-            iconRes = R.drawable.ic_volume,
-        ) {
-            DesignSlider(
-                value = volume,
-                onValueChange = {
+        // 弹性 3：调节行与参数条之间
+        Spacer(Modifier.weight(0.5f))
+
+        ParamStrip(
+            volume = volume,
+            timeoutMin = timeoutMin,
+            tone = tone,
+            playback = playback,
+            expanded = expanded,
+            onToggle = { expanded = if (expanded == it) null else it },
+        )
+
+        // 展开的调节面板：就地展开，不弹窗、不离开界面
+        expanded?.let { p ->
+            Spacer(Modifier.height(10.dp))
+            ParamPanel(
+                param = p,
+                volume = volume,
+                timeoutMin = timeoutMin,
+                tone = tone,
+                onVolume = {
                     volume = it
                     pending = true
                 },
-                valueRange = 0f..1f,
-                steps = 0,
-                contentDescription = "节拍音量 ${(volume * 100).roundToInt()}%",
-                onValueChangeFinished = {
-                    settings.volume = volume
-                    pushUpdate(context, volume = volume)
+                onVolumeCommit = { settings.volume = volume },
+                onTimer = { timeoutMin = it },
+                onTimerCommit = {
+                    settings.timeoutMin = timeoutMin
+                    pending = true
                 },
-                modifier = Modifier.height(36.dp),
-            )
-        }
-
-        Spacer(Modifier.height(14.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(Tone.entries) { t ->
-                ToneCard(t, selected = tone == t) {
+                onTone = { t ->
                     tone = t
                     settings.tone = t
                     preview.preview(t, volume)
                     pending = true
-                }
-            }
-        }
-
-        Spacer(Modifier.height(18.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(
-                onClick = {
-                    when {
-                        !playback.running -> {
-                            settings.save(bpm, volume, tone, timeoutMin)
-                            context.startForegroundService(startIntent(context, bpm, tone, volume, timeoutMin))
-                        }
-                        playback.paused -> sendCommand(context, MetronomeService.ACTION_RESUME)
-                        else -> sendCommand(context, MetronomeService.ACTION_PAUSE)
-                    }
                 },
-                modifier = Modifier.weight(1f).height(64.dp),
-                shape = RoundedCornerShape(20.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (playback.playing) C_SURFACE2 else C_ACCENT,
-                    contentColor = if (playback.playing) C_TEXT else C_ON_ACCENT
-                )
-            ) {
-                Icon(
-                    painterResource(if (playback.playing) R.drawable.ic_pause else R.drawable.ic_play),
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                    tint = if (playback.playing) C_TEXT else C_ON_ACCENT
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    when {
-                        !playback.running -> "开始"
-                        playback.paused -> "继续"
-                        else -> "暂停"
-                    },
-                    fontSize = 19.sp, fontWeight = FontWeight.ExtraBold
-                )
-            }
-            StopButton(
-                enabled = playback.running,
-                onStop = { sendCommand(context, MetronomeService.ACTION_STOP) },
             )
         }
-        Spacer(Modifier.height(8.dp))
+
+        // 弹性 4：参数条与底部操作区之间（留白稍大，让按钮有独立的呼吸空间）
+        Spacer(Modifier.weight(1.1f))
+
+        ActionRow(
+            playback = playback,
+            onPrimary = {
+                when {
+                    !playback.running -> {
+                        settings.save(bpm, volume, tone, timeoutMin)
+                        context.startForegroundService(startIntent(context, bpm, tone, volume, timeoutMin))
+                    }
+                    playback.paused -> sendCommand(context, MetronomeService.ACTION_RESUME)
+                    else -> sendCommand(context, MetronomeService.ACTION_PAUSE)
+                }
+            },
+            onStop = { sendCommand(context, MetronomeService.ACTION_STOP) },
+        )
     }
 
     errorText?.let { msg ->
@@ -369,14 +302,13 @@ fun AppScreen() {
             confirmButton = { TextButton(onClick = { errorText = null }) { Text("知道了") } },
             title = { Text("播放失败") },
             text = { Text(msg) },
-            containerColor = C_SURFACE,
+            containerColor = C_PANEL,
             titleContentColor = C_TEXT,
             textContentColor = C_TEXT2,
         )
     }
 
     // 首次启动的后台保活引导（ColorOS 会把后台服务杀掉，导致节拍中断）
-    var showGuide by remember { mutableStateOf(!settings.guideShown) }
     if (showGuide) {
         val dismiss = {
             showGuide = false
@@ -394,87 +326,284 @@ fun AppScreen() {
                         "3. 电池 → 选择「无限制」"
                 )
             },
-            containerColor = C_SURFACE,
+            containerColor = C_PANEL,
             titleContentColor = C_TEXT,
             textContentColor = C_TEXT2,
         )
     }
 }
 
+/** 顶部信息带：品牌 + 运行状态点；待机时右侧是后台保活设置的入口。 */
 @Composable
-private fun TopBar(playback: PlaybackState) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(24.dp).background(C_SURFACE, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
-                Box(Modifier.size(9.dp).background(C_ACCENT, RoundedCornerShape(3.dp)))
-            }
-            Spacer(Modifier.width(8.dp))
-            Text("Runner Metronome", color = C_TEXT, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (playback.running) {
+private fun TopBar(playback: PlaybackState, onSettings: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().height(52.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "Runner Metronome",
+            color = C_TEXT,
+            fontSize = 14.5.sp,
+            fontWeight = W_VALUE,
+        )
+        if (playback.running) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
-                    Modifier.size(7.dp).background(
-                        if (playback.paused) C_WARN else C_ACCENT,
-                        RoundedCornerShape(4.dp)
-                    )
+                    Modifier
+                        .size(6.dp)
+                        .background(if (playback.paused) C_DANGER else C_ACCENT, CircleShape)
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
                     if (playback.paused) "已暂停" else "跑步中",
-                    color = if (playback.paused) C_WARN else C_ACCENT,
-                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold
+                    color = if (playback.paused) C_DANGER else C_ACCENT,
+                    fontSize = 12.sp,
+                    fontWeight = W_VALUE,
                 )
-                Spacer(Modifier.width(10.dp))
             }
-            // 核心卖点：不打断音乐
-            Text("♪ 与音乐共存", color = C_TEXT2, fontSize = 11.sp)
+        } else {
+            Surface(
+                onClick = onSettings,
+                color = Color.Transparent,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        painterResource(R.drawable.ic_settings),
+                        contentDescription = "后台保活设置",
+                        modifier = Modifier.size(20.dp),
+                        tint = C_TEXT2,
+                    )
+                }
+            }
         }
     }
 }
 
 /**
- * 节拍柱：5 根高度不同的柱子按当前 BPM 的相位做指数衰减脉冲，
- * 用 graphicsLayer 只触发重绘（不触发布局），跑步中余光即可确认节奏。
+ * 中部焦点带：节拍脉冲 + 巨大步频数字 + 一行说明。
+ * 数字用等宽数字特性（tnum），避免数值变化时水平位置抖动。
  */
 @Composable
-private fun PulseBars(active: Boolean, bpm: Int, modifier: Modifier = Modifier) {
-    val baseHeights = remember { listOf(8f, 14f, 22f, 14f, 8f) }
-    var phase by remember { mutableFloatStateOf(0f) }
-
-    LaunchedEffect(active, bpm) {
-        if (!active) {
-            phase = 0f
-            return@LaunchedEffect
-        }
-        val periodNanos = (60_000_000_000.0 / bpm).toLong().coerceAtLeast(1L)
-        val start = withFrameNanos { it }
-        while (true) {
-            withFrameNanos { now ->
-                phase = ((now - start) % periodNanos).toFloat() / periodNanos
-            }
-        }
+private fun FocusSection(playback: PlaybackState, bpm: Int) {
+    val subtitle = when {
+        playback.running && playback.remainingSec >= 0 ->
+            "剩余 ${formatDuration(playback.remainingSec)}"
+        playback.running -> "已跑 ${formatDuration(playback.elapsedSec)}"
+        else -> "步频 · BPM"
     }
 
-    Row(
-        modifier,
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.Bottom,
+    Column(
+        Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        baseHeights.forEachIndexed { i, h ->
-            Box(
-                Modifier
-                    .padding(horizontal = 2.5.dp)
-                    .width(5.dp)
-                    .height(h.dp)
-                    .graphicsLayer {
-                        val d = ((phase - i * 0.05f) % 1f + 1f) % 1f
-                        val pulse = exp(-d * 5.0).toFloat()
-                        transformOrigin = TransformOrigin(0.5f, 1f)
-                        scaleY = 1f + (12f / h) * pulse
-                        alpha = if (active) 0.45f + 0.55f * pulse else 0.3f
+        PulseBars(
+            active = playback.playing,
+            bpm = bpm,
+            modifier = Modifier.semantics {
+                contentDescription = if (playback.playing) "节拍运行中" else "节拍未运行"
+            },
+        )
+        Spacer(Modifier.height(22.dp))
+        Text(
+            text = "$bpm",
+            style = TextStyle(
+                fontSize = 150.sp,
+                lineHeight = 158.sp,
+                fontWeight = W_DISPLAY,
+                letterSpacing = (-3).sp,
+                fontFeatureSettings = TNUM,
+            ),
+            color = if (playback.playing) C_ACCENT else C_TEXT,
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            subtitle,
+            style = TextStyle(
+                fontSize = 12.5.sp,
+                letterSpacing = 3.5.sp,
+                fontFeatureSettings = TNUM,
+            ),
+            color = C_TEXT2,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/**
+ * 调节行：− 步进器 / 步频滑块 / ＋ 步进器，同一水平轴线。
+ *
+ * 旧版把步进器、滑块、大数字分三处重复展示同一个 BPM 值；
+ * 这里把粗调（滑块）与精调（±1）合并成一行，数值只在大数字处出现一次。
+ */
+@Composable
+private fun AdjustRow(
+    bpm: Int,
+    onStep: (Int) -> Unit,
+    onSlide: (Int) -> Unit,
+    onCommit: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        StepButton(
+            plus = false,
+            contentDesc = "步频减一",
+            onStep = { onStep(-1) },
+            onCommit = onCommit,
+        )
+        BpmSlider(
+            bpm = bpm,
+            onSlide = onSlide,
+            onCommit = onCommit,
+            modifier = Modifier.weight(1f),
+        )
+        StepButton(
+            plus = true,
+            contentDesc = "步频加一",
+            onStep = { onStep(1) },
+            onCommit = onCommit,
+        )
+    }
+}
+
+/** 滑块下方的刻度行：与滑块两端严格对齐（左右各让出一个步进器宽度 + 间距）。 */
+@Composable
+private fun TickRow() {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Spacer(Modifier.width(70.dp))
+        Text(
+            "$BPM_MIN",
+            style = TextStyle(fontSize = 11.5.sp, fontFeatureSettings = TNUM),
+            color = C_TEXT2,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            "$BPM_MAX",
+            style = TextStyle(fontSize = 11.5.sp, fontFeatureSettings = TNUM),
+            color = C_TEXT2,
+        )
+        Spacer(Modifier.width(70.dp))
+    }
+}
+
+@Composable
+private fun BpmSlider(
+    bpm: Int,
+    onSlide: (Int) -> Unit,
+    onCommit: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val span = (BPM_MAX - BPM_MIN).toFloat()
+    TrackSlider(
+        fraction = (bpm - BPM_MIN) / span,
+        onFractionChange = { fr ->
+            onSlide((BPM_MIN + fr * span).roundToInt().coerceIn(BPM_MIN, BPM_MAX))
+        },
+        onCommit = onCommit,
+        contentDescription = "步频 $bpm BPM",
+        modifier = modifier,
+        steps = BPM_MAX - BPM_MIN - 1,
+        trackHeight = 12.dp,
+        thumbSize = 28.dp,
+    )
+}
+
+/**
+ * 自绘轨道滑块。
+ *
+ * 不用 Material3 的 Slider：它在圆钮与已选轨道之间强制留有空隙（M3 规范的一部分），
+ * 在深色窄屏上就是一道突兀的黑缝，圆钮看着像"浮"在轨道外。
+ * 这里改为直接绘制：已选段一直延伸到圆钮圆心，圆钮再盖在上面，两者无缝相接。
+ *
+ * 轨道两端各留出一个圆钮半径，保证圆钮始终完整落在轨道范围内而不探出边缘。
+ */
+@Composable
+private fun TrackSlider(
+    fraction: Float,
+    onFractionChange: (Float) -> Unit,
+    onCommit: () -> Unit,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    steps: Int = 0,
+    trackHeight: Dp = 12.dp,
+    thumbSize: Dp = 28.dp,
+) {
+    val f = fraction.coerceIn(0f, 1f)
+    var widthPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    val thumbRadiusPx = with(density) { (thumbSize / 2).toPx() }
+    // 圆钮圆心可移动的行程：轨道宽度去掉两端各一个半径
+    val travelPx = (widthPx - 2f * thumbRadiusPx).coerceAtLeast(0f)
+
+    Box(
+        modifier
+            .height(56.dp)
+            .onSizeChanged { widthPx = it.width }
+            .pointerInput(travelPx) {
+                if (travelPx <= 0f) return@pointerInput
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    onFractionChange(
+                        ((down.position.x - thumbRadiusPx) / travelPx).coerceIn(0f, 1f)
+                    )
+                    down.consume()
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+                        onFractionChange(
+                            ((change.position.x - thumbRadiusPx) / travelPx).coerceIn(0f, 1f)
+                        )
+                        change.consume()
                     }
-                    .background(C_ACCENT, RoundedCornerShape(3.dp))
+                    onCommit()
+                }
+            }
+            .semantics {
+                this.contentDescription = contentDescription
+                progressBarRangeInfo = ProgressBarRangeInfo(f, 0f..1f, steps)
+                setProgress { target ->
+                    onFractionChange((target / 100f).coerceIn(0f, 1f))
+                    true
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.fillMaxWidth().height(thumbSize)) {
+            val cy = size.height / 2f
+            val th = trackHeight.toPx()
+            val r = th / 2f
+            val trackLeft = thumbRadiusPx
+            val trackW = (size.width - 2f * thumbRadiusPx).coerceAtLeast(0f)
+            val knobX = trackLeft + trackW * f
+
+            drawRoundRect(
+                color = C_PANEL2,
+                topLeft = Offset(trackLeft, cy - r),
+                size = Size(trackW, th),
+                cornerRadius = CornerRadius(r, r),
+            )
+            if (knobX > trackLeft) {
+                drawRoundRect(
+                    color = C_ACCENT,
+                    topLeft = Offset(trackLeft, cy - r),
+                    // 端点用半径兜底，避免极短时圆角塌陷
+                    size = Size((knobX - trackLeft).coerceAtLeast(r), th),
+                    cornerRadius = CornerRadius(r, r),
+                )
+            }
+            drawCircle(
+                color = C_TEXT,
+                radius = thumbSize.toPx() / 2f,
+                center = Offset(knobX, cy),
             )
         }
     }
@@ -485,10 +614,10 @@ private fun PulseBars(active: Boolean, bpm: Int, modifier: Modifier = Modifier) 
  * 长按期间只改本地数值，松手后才通过 onCommit 下发一次，避免节拍被反复重建。
  */
 @Composable
-private fun StepperBtn(
-    label: String,
+private fun StepButton(
+    plus: Boolean,
     contentDesc: String,
-    onTick: () -> Unit,
+    onStep: () -> Unit,
     onCommit: () -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -500,7 +629,7 @@ private fun StepperBtn(
             delay(STEP_LONG_PRESS_MS)
             repeating = true
             while (true) {
-                onTick()
+                onStep()
                 delay(STEP_REPEAT_MS)
             }
         } else if (repeating) {
@@ -512,30 +641,338 @@ private fun StepperBtn(
     Surface(
         onClick = {
             if (!repeating) {
-                onTick()
+                onStep()
                 onCommit()
             }
         },
         interactionSource = interactionSource,
-        shape = RoundedCornerShape(16.dp),
-        color = if (pressed) C_SURFACE2 else C_SURFACE,
-        border = BorderStroke(1.dp, if (pressed) C_ACCENT else C_LINE),
+        shape = CircleShape,
+        color = if (pressed) C_PANEL2 else C_PANEL,
         modifier = Modifier
             .size(56.dp)
             .semantics { contentDescription = contentDesc },
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Text(label, color = C_TEXT, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+            // 用两个色块拼出 − / ＋，避免为两种符号各配一套 drawable
+            Box(
+                Modifier
+                    .width(17.dp)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(C_TEXT)
+            )
+            if (plus) {
+                Box(
+                    Modifier
+                        .width(3.dp)
+                        .height(17.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(C_TEXT)
+                )
+            }
         }
+    }
+}
+
+/**
+ * 参数条：把原先「步频 / 倒计时 / 音量」三张等权卡片压成一条三等分窄条。
+ * 点击任意一格就地展开该参数的调节面板——主界面因此保持极简。
+ */
+@Composable
+private fun ParamStrip(
+    volume: Float,
+    timeoutMin: Int,
+    tone: Tone,
+    playback: PlaybackState,
+    expanded: Param?,
+    onToggle: (Param) -> Unit,
+) {
+    val timerValue = when {
+        timeoutMin == 0 -> "不限"
+        playback.running && playback.remainingSec >= 0 -> formatDuration(playback.remainingSec)
+        else -> "$timeoutMin min"
+    }
+
+    Surface(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = C_PANEL,
+    ) {
+        Row(
+            Modifier.height(84.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ParamCell(
+                iconRes = R.drawable.ic_volume,
+                label = "音量",
+                value = "${(volume * 100).roundToInt()}%",
+                selected = expanded == Param.VOLUME,
+                onClick = { onToggle(Param.VOLUME) },
+                modifier = Modifier.weight(1f),
+            )
+            CellDivider()
+            ParamCell(
+                iconRes = R.drawable.ic_timer,
+                label = "倒计时",
+                value = timerValue,
+                selected = expanded == Param.TIMER,
+                onClick = { onToggle(Param.TIMER) },
+                modifier = Modifier.weight(1f),
+            )
+            CellDivider()
+            ParamCell(
+                iconRes = if (tone == Tone.FOOTSTEP) R.drawable.ic_tone_foot else R.drawable.ic_tone_bubble,
+                label = "音色",
+                value = tone.display,
+                selected = expanded == Param.TONE,
+                onClick = { onToggle(Param.TONE) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CellDivider() {
+    Box(
+        Modifier
+            .width(1.dp)
+            .height(52.dp)
+            .background(C_LINE)
+    )
+}
+
+@Composable
+private fun ParamCell(
+    iconRes: Int,
+    label: String,
+    value: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        color = if (selected) C_PANEL2 else Color.Transparent,
+        modifier = modifier.fillMaxHeight(),
+    ) {
+        Column(
+            Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                painterResource(iconRes),
+                contentDescription = null,
+                modifier = Modifier.size(17.dp),
+                tint = if (selected) C_ACCENT else C_TEXT2,
+            )
+            Spacer(Modifier.height(7.dp))
+            Text(
+                label,
+                color = C_TEXT2,
+                fontSize = 11.sp,
+                fontWeight = W_LABEL,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                value,
+                style = TextStyle(
+                    fontSize = 14.sp,
+                    fontWeight = W_VALUE,
+                    fontFeatureSettings = TNUM,
+                ),
+                color = C_TEXT,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/** 就地展开的参数调节面板：音量 / 倒计时用滑块，音色用三选一。 */
+@Composable
+private fun ParamPanel(
+    param: Param,
+    volume: Float,
+    timeoutMin: Int,
+    tone: Tone,
+    onVolume: (Float) -> Unit,
+    onVolumeCommit: () -> Unit,
+    onTimer: (Int) -> Unit,
+    onTimerCommit: () -> Unit,
+    onTone: (Tone) -> Unit,
+) {
+    Surface(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = C_PANEL,
+    ) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            when (param) {
+                Param.VOLUME, Param.TIMER -> {
+                    val isVolume = param == Param.VOLUME
+                    val title = if (isVolume) "节拍音量" else "训练倒计时"
+                    val readout = if (isVolume) {
+                        "${(volume * 100).roundToInt()}%"
+                    } else if (timeoutMin == 0) {
+                        "不限"
+                    } else {
+                        "$timeoutMin min"
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(title, color = C_TEXT2, fontSize = 12.sp, fontWeight = W_LABEL)
+                        Text(
+                            readout,
+                            style = TextStyle(
+                                fontSize = 14.sp,
+                                fontWeight = W_VALUE,
+                                fontFeatureSettings = TNUM,
+                            ),
+                            color = C_TEXT,
+                        )
+                    }
+                    TrackSlider(
+                        fraction = if (isVolume) volume else timeoutMin.toFloat() / TIMEOUT_MAX.toFloat(),
+                        onFractionChange = { fr ->
+                            if (isVolume) {
+                                onVolume(fr)
+                            } else {
+                                onTimer((fr * TIMEOUT_MAX).roundToInt().coerceIn(0, TIMEOUT_MAX))
+                            }
+                        },
+                        onCommit = { if (isVolume) onVolumeCommit() else onTimerCommit() },
+                        contentDescription = if (isVolume) {
+                            "节拍音量 ${(volume * 100).roundToInt()}%"
+                        } else if (timeoutMin == 0) {
+                            "倒计时不限时"
+                        } else {
+                            "倒计时 $timeoutMin 分钟"
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        steps = if (isVolume) 0 else TIMEOUT_MAX - 1,
+                        trackHeight = 10.dp,
+                        thumbSize = 26.dp,
+                    )
+                }
+
+                Param.TONE -> {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Tone.entries.forEach { t ->
+                            ToneChip(
+                                tone = t,
+                                selected = tone == t,
+                                onClick = { onTone(t) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 音色三选一：点击即切换并试听。选中态靠颜色与描边区分，字重保持一致。 */
+@Composable
+private fun ToneChip(
+    tone: Tone,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp),
+        color = if (selected) C_PANEL2 else Color.Transparent,
+        border = BorderStroke(1.dp, if (selected) C_ACCENT else C_LINE),
+        modifier = modifier
+            .height(58.dp)
+            .semantics { contentDescription = "音色 ${tone.display}" },
+    ) {
+        Column(
+            Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                painterResource(
+                    if (tone == Tone.FOOTSTEP) R.drawable.ic_tone_foot else R.drawable.ic_tone_bubble
+                ),
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = if (selected) C_ACCENT else C_TEXT2,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                tone.display,
+                color = if (selected) C_TEXT else C_TEXT2,
+                fontSize = 11.5.sp,
+                fontWeight = W_VALUE,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/** 底部操作区：白色主按钮（开始 / 继续 / 暂停）+ 长按停止。 */
+@Composable
+private fun ActionRow(
+    playback: PlaybackState,
+    onPrimary: () -> Unit,
+    onStop: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 26.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Button(
+            onClick = onPrimary,
+            modifier = Modifier.weight(1f).height(62.dp),
+            shape = RoundedCornerShape(20.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = C_TEXT,
+                contentColor = C_ON_LIGHT,
+            ),
+        ) {
+            Icon(
+                painterResource(
+                    if (playback.playing) R.drawable.ic_pause else R.drawable.ic_play
+                ),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = C_ON_LIGHT,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                when {
+                    !playback.running -> "开始"
+                    playback.paused -> "继续"
+                    else -> "暂停"
+                },
+                fontSize = 20.sp,
+                fontWeight = W_ACTION,
+            )
+        }
+        StopButton(
+            enabled = playback.running,
+            onStop = onStop,
+        )
     }
 }
 
 /**
  * 停止键：长按 0.4s 停止（防误触）。
  *
- * 提示必须**常驻**在按钮上：按下之后的任何提示都会被指尖盖住（96×64dp 的按钮
- * 基本会被指腹完全覆盖），所以"要长按"这件事得在按下之前就看到。
- * 长按到位时再补一次触觉反馈，不依赖眼睛确认。
+ * 提示必须**常驻**在按钮上：按下之后的任何提示都会被指尖盖住，所以"要长按"这件事
+ * 得在按下之前就看到。长按到位时再补一次触觉反馈，不依赖眼睛确认。
  */
 @Composable
 private fun StopButton(enabled: Boolean, onStop: () -> Unit) {
@@ -563,136 +1000,107 @@ private fun StopButton(enabled: Boolean, onStop: () -> Unit) {
         }
     }
 
-    OutlinedButton(
+    Surface(
         onClick = { /* 由长按触发，避免误触 */ },
         enabled = enabled,
         interactionSource = interactionSource,
+        shape = RoundedCornerShape(20.dp),
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, if (pressed && enabled) C_DANGER else C_LINE),
         modifier = Modifier
-            .width(104.dp)
-            .height(64.dp)
+            .width(92.dp)
+            .height(62.dp)
             .clip(RoundedCornerShape(20.dp))
             .drawWithContent {
                 drawContent()
                 // 长按进度：从底部向上填充（手指可能盖住文字，边缘仍可见）
                 if (holdFraction > 0f) {
                     drawRect(
-                        color = C_WARN.copy(alpha = 0.3f),
+                        color = C_DANGER.copy(alpha = 0.28f),
                         topLeft = Offset(0f, size.height * (1f - holdFraction)),
                         size = Size(size.width, size.height * holdFraction),
                     )
                 }
             },
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, if (pressed) C_WARN else C_LINE),
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = C_WARN),
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(painterResource(R.drawable.ic_stop), null, Modifier.size(16.dp), tint = C_WARN)
-            Spacer(Modifier.height(2.dp))
-            Text("长按停止", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        }
-    }
-}
-
-@Composable
-private fun SliderCard(
-    title: String,
-    value: String,
-    unit: String,
-    iconRes: Int,
-    slider: @Composable () -> Unit,
-) {
-    Card(
-        Modifier.fillMaxWidth().padding(top = 12.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = C_SURFACE),
-        border = BorderStroke(1.dp, C_LINE)
-    ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(painterResource(iconRes), null, Modifier.size(16.dp), tint = C_TEXT2)
-                    Spacer(Modifier.width(6.dp))
-                    Text(title, color = C_TEXT2, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                }
-                Text(if (unit.isEmpty()) value else "$value $unit", color = C_TEXT, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.height(2.dp))
-            slider()
+        Column(
+            Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                painterResource(R.drawable.ic_stop),
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = if (enabled) C_DANGER else C_TEXT2,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                "长按停止",
+                color = if (enabled) C_DANGER else C_TEXT2,
+                fontSize = 11.5.sp,
+                fontWeight = W_VALUE,
+                maxLines = 1,
+            )
         }
     }
 }
 
 /**
- * 按设计规范定制的滑块：荧光绿轨道 + 28dp 拇指（默认 Material3 配色与设计稿不符）。
+ * 节拍柱：7 根高度不同的柱子按当前 BPM 的相位做指数衰减脉冲，
+ * 用 graphicsLayer 只触发重绘（不触发布局），跑步中余光即可确认节奏。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DesignSlider(
-    value: Float,
-    onValueChange: (Float) -> Unit,
-    valueRange: ClosedFloatingPointRange<Float>,
-    steps: Int,
-    contentDescription: String,
-    modifier: Modifier = Modifier,
-    onValueChangeFinished: (() -> Unit)? = null,
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val colors = SliderDefaults.colors(
-        thumbColor = C_TEXT,
-        activeTrackColor = C_ACCENT,
-        inactiveTrackColor = C_SURFACE2,
-        activeTickColor = Color.Transparent,
-        inactiveTickColor = Color.Transparent,
-    )
-    Slider(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = modifier.semantics { this.contentDescription = contentDescription },
-        enabled = true,
-        valueRange = valueRange,
-        steps = steps,
-        onValueChangeFinished = onValueChangeFinished,
-        colors = colors,
-        interactionSource = interactionSource,
-        thumb = {
-            SliderDefaults.Thumb(
-                interactionSource = interactionSource,
-                colors = colors,
-                enabled = true,
-                thumbSize = DpSize(28.dp, 28.dp),
-            )
-        },
-    )
-}
+private fun PulseBars(active: Boolean, bpm: Int, modifier: Modifier = Modifier) {
+    val baseHeights = remember { listOf(12f, 20f, 28f, 36f, 28f, 20f, 12f) }
+    var phase by remember { mutableFloatStateOf(0f) }
 
-@Composable
-private fun ToneCard(t: Tone, selected: Boolean, onClick: () -> Unit) {
-    val iconRes = when (t) {
-        Tone.FOOTSTEP -> R.drawable.ic_tone_foot
-        else -> R.drawable.ic_tone_bubble
-    }
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(18.dp),
-        color = if (selected) C_TONE_ON else C_SURFACE,
-        border = BorderStroke(1.5.dp, if (selected) C_ACCENT else C_LINE),
-        modifier = Modifier
-            .width(96.dp)
-            .semantics { contentDescription = "音色 ${t.display}" }
-    ) {
-        Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                Modifier.size(40.dp).background(if (selected) C_ACCENT else C_SURFACE2, RoundedCornerShape(12.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(painterResource(iconRes), null, Modifier.size(22.dp), tint = if (selected) C_ON_ACCENT else C_TEXT)
+    LaunchedEffect(active, bpm) {
+        if (!active) {
+            phase = 0f
+            return@LaunchedEffect
+        }
+        val periodNanos = (60_000_000_000.0 / bpm).toLong().coerceAtLeast(1L)
+        val start = withFrameNanos { it }
+        while (true) {
+            withFrameNanos { now ->
+                phase = ((now - start) % periodNanos).toFloat() / periodNanos
             }
-            Spacer(Modifier.height(6.dp))
-            Text(t.display, color = C_TEXT, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
         }
     }
+
+    Box(modifier.height(36.dp), contentAlignment = Alignment.BottomCenter) {
+        Row(
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            baseHeights.forEachIndexed { i, h ->
+                Box(
+                    Modifier
+                        .padding(horizontal = 2.5.dp)
+                        .width(5.dp)
+                        .height(h.dp)
+                        .graphicsLayer {
+                            val d = ((phase - i * 0.05f) % 1f + 1f) % 1f
+                            val pulse = exp(-d * 5.0).toFloat()
+                            transformOrigin = TransformOrigin(0.5f, 1f)
+                            scaleY = 1f + (10f / h) * pulse
+                            alpha = if (active) 0.45f + 0.55f * pulse else 0.3f
+                        }
+                        .background(C_ACCENT, RoundedCornerShape(3.dp))
+                )
+            }
+        }
+    }
+}
+
+/** 训练时长的自适应格式：超过 1 小时显示 h:mm:ss，否则 m:ss。 */
+private fun formatDuration(seconds: Int): String {
+    val s = seconds.coerceAtLeast(0)
+    val h = s / 3600
+    val m = (s % 3600) / 60
+    val sec = s % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%d:%02d".format(m, sec)
 }
 
 // —— 与服务通信 ——

@@ -1,4 +1,4 @@
 <resources>
-    <!-- 冷启动窗口底色：与 Compose 深色主题一致，避免启动瞬间白闪 -->
-    <color name="window_background">#0A1426</color>
+    <!-- 冷启动窗口底色：与 Compose 深色主题一致（MainActivity 的 C_BG），避免启动瞬间白闪 -->
+    <color name="window_background">#0A0C10</color>
 </resources>
