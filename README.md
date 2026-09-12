@@ -87,3 +87,7 @@ gradle assembleDebug testDebugUnitTest --no-daemon
 本项目采用 [MIT 许可证](LICENSE)。
 
 内置节拍音色衍生自 BigSoundBank 的 CC0 公有领域素材，原始瞬态已提取并转为 16-bit PCM；详见 [LICENSE](LICENSE)。
+
+---
+
+本项目由 **DeepSeek Harness** 制作：从界面设计、Kotlin / Compose 实现到构建与发布，全程在其会话中完成。

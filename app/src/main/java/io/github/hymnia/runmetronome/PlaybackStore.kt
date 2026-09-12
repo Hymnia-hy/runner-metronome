@@ -41,8 +41,17 @@ data class PlaybackState(
     val playing: Boolean get() = running && !paused
 }
 
-/** mm:ss 格式化，供通知与界面显示剩余时间。 */
+/**
+ * 训练时长格式化：超过 1 小时显示 h:mm:ss，否则 m:ss。
+ *
+ * 通知栏与界面共用这一个函数——同一时刻两处必须显示一致。
+ * （旧实现通知走 m:ss、界面走 h:mm:ss，跑过 1 小时后会一个显示 84:30、
+ *   另一个显示 1:24:30。）
+ */
 fun formatClock(seconds: Int): String {
     val s = seconds.coerceAtLeast(0)
-    return "%d:%02d".format(s / 60, s % 60)
+    val h = s / 3600
+    val m = (s % 3600) / 60
+    val sec = s % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%d:%02d".format(m, sec)
 }

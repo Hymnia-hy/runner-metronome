@@ -167,6 +167,8 @@ fun AppScreen() {
 
     // 试听用的短音播放器（与节拍同一媒体通道，响度观感一致）
     val preview = remember { MetronomePlayer(context) }
+    // 进界面就预热 SoundPool，避免第一次点音色卡片时样本还没解码完而无声
+    LaunchedEffect(Unit) { preview.preload() }
     DisposableEffect(Unit) { onDispose { preview.release() } }
 
     // 服务报错回传 → 弹窗提示
@@ -262,7 +264,12 @@ fun AppScreen() {
                     volume = it
                     pending = true
                 },
-                onVolumeCommit = { settings.volume = volume },
+                onVolumeCommit = {
+                    settings.volume = volume
+                    // 音量只改音轨增益、不重建音轨，松手就立刻下发，
+                    // 不必等 250ms 防抖窗口——拖完马上听到变化
+                    pushUpdate(context, volume = volume)
+                },
                 onTimer = { timeoutMin = it },
                 onTimerCommit = {
                     settings.timeoutMin = timeoutMin
@@ -389,8 +396,8 @@ private fun TopBar(playback: PlaybackState, onSettings: () -> Unit) {
 private fun FocusSection(playback: PlaybackState, bpm: Int) {
     val subtitle = when {
         playback.running && playback.remainingSec >= 0 ->
-            "剩余 ${formatDuration(playback.remainingSec)}"
-        playback.running -> "已跑 ${formatDuration(playback.elapsedSec)}"
+            "剩余 ${formatClock(playback.remainingSec)}"
+        playback.running -> "已跑 ${formatClock(playback.elapsedSec)}"
         else -> "步频 · BPM"
     }
 
@@ -689,7 +696,7 @@ private fun ParamStrip(
 ) {
     val timerValue = when {
         timeoutMin == 0 -> "不限"
-        playback.running && playback.remainingSec >= 0 -> formatDuration(playback.remainingSec)
+        playback.running && playback.remainingSec >= 0 -> formatClock(playback.remainingSec)
         else -> "$timeoutMin min"
     }
 
@@ -789,6 +796,12 @@ private fun ParamCell(
     }
 }
 
+/**
+ * 展开面板的固定高度：按滑块版（标签行 + 56dp 滑块触摸区）的自然高度取。
+ * 音色版内容更矮，在同一高度内居中。
+ */
+private val PARAM_PANEL_HEIGHT = 104.dp
+
 /** 就地展开的参数调节面板：音量 / 倒计时用滑块，音色用三选一。 */
 @Composable
 private fun ParamPanel(
@@ -807,7 +820,15 @@ private fun ParamPanel(
         shape = RoundedCornerShape(18.dp),
         color = C_PANEL,
     ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+        // 高度必须锁死：两种内容的自然高度不同（滑块版更高），
+        // 否则切换标签时整个主界面会跟着上下跳。
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .height(PARAM_PANEL_HEIGHT)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
             when (param) {
                 Param.VOLUME, Param.TIMER -> {
                     val isVolume = param == Param.VOLUME
@@ -1092,15 +1113,6 @@ private fun PulseBars(active: Boolean, bpm: Int, modifier: Modifier = Modifier) 
             }
         }
     }
-}
-
-/** 训练时长的自适应格式：超过 1 小时显示 h:mm:ss，否则 m:ss。 */
-private fun formatDuration(seconds: Int): String {
-    val s = seconds.coerceAtLeast(0)
-    val h = s / 3600
-    val m = (s % 3600) / 60
-    val sec = s % 60
-    return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%d:%02d".format(m, sec)
 }
 
 // —— 与服务通信 ——

@@ -159,6 +159,15 @@ class MetronomePlayer(private val context: Context) {
 
     // —— 短音（试听 / 提示） ——
 
+    /**
+     * 预热 SoundPool。SoundPool.load() 是异步解码，而它是懒加载的：
+     * 不预热的话，用户第一次点音色卡片时样本往往还没就绪，表现为"第一次点没声音"。
+     * 界面进入时就调用，正常操作节奏下早已加载完毕。
+     */
+    fun preload() {
+        soundPool()
+    }
+
     /** 音色卡片试听：与节拍同一媒体通道，响度观感一致。 */
     fun preview(tone: Tone, volume: Float) = playShort(tone, volume)
 
